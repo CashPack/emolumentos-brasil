@@ -1,0 +1,12 @@
+.ssh/
+__pycache__/
+*.pyc
+.env
+.venv/
+.DS_Store
+
+# Node / Next
+admin/node_modules/
+admin/.next/
+admin/out/
+admin/.vercel/

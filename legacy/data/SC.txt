@@ -1,0 +1,49 @@
+---INÍCIO SC---
+TABELA DE EMOLUMENTOS - SANTA CATARINA (SC)
+Vigência: 01/01/2026 (Circular CGJ nº 643/2025)
+Reajuste: 4,18% (INPC acumulado dezembro/2024 a novembro/2025)
+
+TABELA I – ATOS DO TABELIÃO DE NOTAS
+
+1. ESCRITURA SEM VALOR ECONÔMICO:
+   Emolumentos: R$ 87,65 | FRJ: R$ 19,92 | Total: R$ 107,57
+
+1.1. Escritura pública de declaração de residência:
+   Emolumentos: R$ 24,81 | FRJ: R$ 5,63 | Total: R$ 30,44
+
+2. ESCRITURA COM VALOR ECONÔMICO (faixas):
+2.1. de R$ 0,01 a R$ 13.786,58: R$ 170,95 + R$ 38,85 = R$ 209,80
+2.2. de R$ 13.786,59 a R$ 20.679,87: R$ 197,13 + R$ 44,80 = R$ 241,93
+2.3. de R$ 20.679,88 a R$ 28.951,83: R$ 279,86 + R$ 63,61 = R$ 343,47
+(... faixas progressivas até valor máximo)
+2.22. Acima do valor máximo: A cada R$ 50.000,00 adicionar R$ 50,00, limitado a 80% do máximo da Lei nº 17.654/2018
+
+3. ESCRITURA PÚBLICA DE INVENTÁRIO, DIVÓRCIO, SEPARAÇÃO E DISSOLUÇÃO DE UNIÃO ESTÁVEL:
+3.1. Sem disposição acerca da partilha de bens:
+   Emolumentos: R$ 124,07 | FRJ: R$ 28,20 | Total: R$ 152,27
+
+3.2. Com disposição acerca da partilha de bens:
+3.2.1. Acervo de R$ 0,01 a R$ 97.195,46: R$ 601,77 + R$ 136,78 = R$ 738,55
+3.2.2. Acervo de R$ 97.195,47 a R$ 206.798,84: R$ 1.221,22 + R$ 277,58 = R$ 1.498,80
+3.2.3. Acervo de R$ 206.798,85 a R$ 551.463,55: R$ 2.407,13 + R$ 547,14 = R$ 2.954,27
+3.2.4. Acervo acima de R$ 551.463,55: conforme item 2
+
+4. ESCRITURAS DE INCORPORAÇÃO E INSTITUIÇÃO DE CONDOMÍNIO:
+   Emolumentos: R$ 1.020,19 | FRJ: R$ 231,88 | Total: R$ 1.252,07
+4.1. Adicional por unidade: R$ 16,53 + R$ 3,75 = R$ 20,28 (limitado ao valor do item 2.22)
+
+5. ESCRITURA DE CONVENÇÃO DE CONDOMÍNIO:
+   Emolumentos: R$ 253,66 | FRJ: R$ 57,65 | Total: R$ 311,31
+
+6. ESCRITURA DE PROCURAÇÃO OU SUBSTABELECIMENTO:
+6.1. Para mera representação em órgãos ou instituições:
+   Emolumentos: R$ 51,00 | FRJ: R$ 11,59 | Total: R$ 62,59
+
+Notas:
+- FRJ = Fundo de Reaparelhamento do Judiciário
+- Valores atualizados conforme INPC 4,18%
+- Limite máximo: 80% do valor constante no Anexo Único da Lei nº 17.654/2018
+
+Fonte: Circular CGJ nº 643/2025 - TJSC
+Processo: 0101878-55.2025.8.24.0710
+---FIM SC---

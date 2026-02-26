@@ -1,0 +1,75 @@
+---INÍCIO RO---
+TABELA DE EMOLUMENTOS - RONDÔNIA (RO)
+Vigência: 01/01/2026 (Provimento Corregedoria nº 36/2025)
+Reajuste: 4,18% (INPC acumulado dezembro/2024 a novembro/2025)
+
+TABELA II - TABELIONATOS DE NOTAS
+
+CÓDIGO 201 - Reconhecimento de firmas:
+a) Reconhecimento de firma - por semelhança sem valor econômico
+   Emolumento: R$ 3,80 | Total: R$ 6,67
+b) Reconhecimento de firma - por semelhança com valor econômico
+   Emolumento: R$ 9,51 | Total: R$ 14,36
+c) Reconhecimento de firma por verdadeiro ou autêntico
+   Emolumento: R$ 13,31 | Total: R$ 19,47
+
+CÓDIGO 202 - Autenticação:
+   Emolumento: R$ 3,81 | Total: R$ 6,69
+
+CÓDIGO 204 - Procuração e Substabelecimento:
+a) Para fins previdenciários
+   Emolumento: R$ 19,08 | Total: R$ 27,23
+b) Com poderes para o foro em geral
+   Emolumento: R$ 28,57 | Total: R$ 39,99
+c) Sem valor econômico
+   Emolumento: R$ 38,08 | Total: R$ 52,79
+d) Com valor econômico acima de R$ 15.000,00
+   Emolumento: R$ 76,20 | Total: R$ 104,07
+e) Para gerir e administrar empresas, ou amplos poderes, pessoa física
+   Emolumento: R$ 152,36 | Total: R$ 206,49
+
+CÓDIGO 205 - Escrituras (incluindo traslado e certidão):
+a) sem valor declarado
+   Emolumento: R$ 285,70 | Total: R$ 385,84
+b) com valor declarado (faixas progressivas):
+   - R$ 0,01 até R$ 29.684,00: Emolumento R$ 314,35 | Total R$ 424,37
+   - R$ 29.684,01 até R$ 39.386,00: Emolumento R$ 607,81 | Total R$ 819,07
+   (... faixas adicionais conforme tabela completa abaixo)
+
+CÓDIGO 206 - Certidão:
+a) até 5 (cinco) folhas datilografadas ou digitadas
+   Emolumento: R$ 20,30 | Total: R$ 28,87
+b) Por grupo de 5 (cinco) folhas ou fração que exceder
+   Emolumento: R$ 16,39 | Total: R$ 22,05
+
+TABELA I - REGISTRO CIVIL DAS PESSOAS NATURAIS
+
+CÓDIGO 106 - Certidão:
+a) até 5 (cinco) folhas
+   Emolumento: R$ 24,84 | Total: R$ 34,98
+b) por grupo de 5 folhas ou fração que exceder
+   Emolumento: R$ 19,99 | Total: R$ 26,89
+
+CÓDIGO 101 - Casamento (habilitação completa):
+   Emolumento: R$ 116,45 | Total: R$ 158,19
+
+CÓDIGO 103 - Retificação de Nascimento, Casamento e Óbito:
+   Emolumento: R$ 131,53 | Total: R$ 178,48
+
+TABELA IV - TABELIONATOS DE PROTESTOS
+
+CÓDIGO 405 - Certidão:
+a) Negativa ou Positiva de até 20 títulos
+   Emolumento: R$ 18,47 | Total: R$ 26,41
+
+---FIM RO---
+
+REFERÊNCIA COMPLETA DA TABELA II - CÓDIGO 205.b (Escrituras com valor):
+- R$ 0,01 até R$ 29.684,00: Emolumento R$ 314,35 | Total R$ 424,37
+- R$ 29.684,01 até R$ 39.386,00: Emolumento R$ 607,81 | Total R$ 819,07
+- R$ 39.386,01 até R$ 49.085,00: Emolumento R$ 754,48 | Total R$ 1.016,35
+- R$ 49.085,01 até R$ 58.787,00: Emolumento R$ 901,21 | Total R$ 1.213,70
+- Acima de R$ 2.794.424,01: Emolumento R$ 16.305,42 | Total R$ 21.932,36
+
+Fonte: Provimento Corregedoria nº 36/2025 - TJRO
+Publicação: Diário da Justiça - 18/12/2025

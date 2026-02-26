@@ -1,0 +1,77 @@
+---INÍCIO RR---
+TABELA DE EMOLUMENTOS - RORAIMA (RR)
+Vigência: 01/02/2026 (Provimento TJRR/CGJ nº 5/2026)
+Reajuste: 1,235280% (IPCA acumulado julho/2025 a dezembro/2025)
+
+TABELA C - TABELIONATO DE NOTAS
+
+C2 - Escritura Pública sem Valor Declarado:
+C2A - De quitação, seja qual for o valor
+   Emolumento: R$ 74,90 | Total: R$ 91,79
+C2B - Declaratória
+   Emolumento: R$ 74,90 | Total: R$ 91,79
+C2C - Extinção de condomínio ou divisão por imóvel que resultar
+   Emolumento: R$ 90,61 | Total: R$ 110,63
+C2D - Pacto antenupcial
+   Emolumento: R$ 90,61 | Total: R$ 110,63
+C2E - Reconhecimento de paternidade
+   Emolumento: R$ 90,61 | Total: R$ 110,63
+C2F - Emancipação
+   Emolumento: R$ 90,61 | Total: R$ 110,63
+C2G - Revogação ou distrato
+   Emolumento: R$ 90,61 | Total: R$ 110,63
+C2H - Ata Notarial
+   Emolumento: R$ 228,34 | Total: R$ 275,91
+
+C1 - Escritura Pública com Valor Declarado (faixas):
+C1A - Até R$ 5.000,00: Emolumento R$ 120,81 | Total R$ 146,87
+C1B - R$ 5.000,01 até R$ 10.000,00: Emolumento R$ 163,10 | Total R$ 197,63
+C1C - R$ 10.000,01 até R$ 15.000,00: Emolumento R$ 219,88 | Total R$ 265,75
+(... até faixa máxima acima de R$ 300.000,00: R$ 3.274,05)
+
+C4 - Procuração Pública ou Substabelecimento:
+C4A - Específica INSS, FUNRURAL, PASEP, PIS, FGTS, e Pensão
+   Emolumento: R$ 31,41 | Total: R$ 39,59
+C4B - Movimentação de contas bancárias; Recebimento de vencimento; Autorizações simples; para casamento
+   Emolumento: R$ 60,41 | Total: R$ 74,39
+C4C - Transferências ou cessões; Constituição de firmas e sociedades; Acompanhar inventário; Poderes gerais/amplos para administração ou gerência
+   Emolumento: R$ 84,57 | Total: R$ 103,39
+C4D - Pacto antenupcial
+   Emolumento: R$ 84,57 | Total: R$ 103,39
+C4E - Reconhecimento de paternidade
+   Emolumento: R$ 7,25 | Total: R$ 10,60
+
+C5 - Certidões ou traslados:
+C5A - Certidão de existência do ato
+   Emolumento: R$ 37,46 | Total: R$ 46,85
+C5B - Certidão por ato, com emissão de traslado de procuração
+   Emolumento: R$ 12,08 | Total: R$ 16,39
+C5C - Certidão por ato, com emissão de traslado de Escritura Pública e Testamento
+   Emolumento: R$ 144,98 | Total: R$ 175,88
+
+C6 - Averbação:
+C6A - Averbação
+   Emolumento: R$ 48,33 | Total: R$ 59,90
+
+C10 - Reconhecimento de firma e autenticação:
+C10A - Reconhecimento de firma, por assinatura
+   Emolumento: R$ 3,62 | Total: R$ 6,24
+
+C8 - Pública forma de documento:
+C8A - Uma única página
+   Emolumento: R$ 36,24 | Total: R$ 45,39
+C8B - Por página que exceder
+   Emolumento: R$ 12,08 | Total: R$ 16,39
+
+C9 - Diligência:
+C9A - Com transporte por conta do requerente dentro da zona urbana
+   Emolumento: R$ 48,33 | Total: R$ 59,90
+
+Estrutura de taxas:
+- Fecom: 5,00%
+- Fundejurr e Fiscalização: 15,00%
+- Selo: R$ 1,90
+
+Fonte: Provimento TJRR/CGJ nº 5/2026
+Publicação: DJE 8026, 29/01/2026
+---FIM RR---
