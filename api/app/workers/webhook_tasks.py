@@ -5,6 +5,7 @@ para garantir resposta rápida ao Asaas (<1s).
 """
 
 import asyncio
+import json
 import logging
 
 from sqlalchemy.orm import Session
@@ -17,7 +18,7 @@ from app.core.config import getenv
 logger = logging.getLogger(__name__)
 
 
-async def processar_pagamento_recebido(payload: dict, db: Session) -> None:
+async def processar_pagamento_recebido(payload, db: Session) -> None:
     """
     Processamento pesado em background para evento PAYMENT_RECEIVED/PAYMENT_CONFIRMED.
     
@@ -28,8 +29,19 @@ async def processar_pagamento_recebido(payload: dict, db: Session) -> None:
     4. Log
     
     Tudo isso roda em background sem bloquear a resposta ao Asaas.
+    
+    NOTE: O payload pode vir como string ou dict, convertemos para dict automaticamente.
     """
     try:
+        # Converter string para dict se necessário
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+                logger.info("[asaas-background] Payload convertido de string para dict")
+            except json.JSONDecodeError as e:
+                logger.error(f"[asaas-background] Erro ao converter payload: {e}")
+                return
+        
         payment = payload.get("payment") or {}
         payment_id = payment.get("id")
         customer = payment.get("customer") or payload.get("customer") or {}
