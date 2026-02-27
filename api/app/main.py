@@ -1,3 +1,6 @@
+import logging
+import sys
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -10,6 +13,19 @@ from app.routers import public_leads
 from app.routers import webhooks_asaas_optimized as webhooks_asaas
 from app.routers import webhooks_rmchat
 from app.services.seed import ensure_admin
+
+# Configuração de logging para aparecer nos logs do Render
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+
+# Forçar nível INFO para loggers específicos
+logging.getLogger("app.workers.webhook_tasks").setLevel(logging.INFO)
+logging.getLogger("asaas-background").setLevel(logging.INFO)
 
 app = FastAPI(title="Pratico Admin API", version="0.1.0")
 
