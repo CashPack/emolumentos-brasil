@@ -35,11 +35,18 @@ async def _process_payment_webhook(payload, db: Session):
                 print(f"[ASAAS-BACKGROUND] Erro ao converter payload: {e}")
                 return
         
-        print(f"[ASAAS-BACKGROUND] >>> WORKER INICIADO")
-        print(f"[ASAAS-BACKGROUND] >>> Payload tipo: {type(payload)}")
+        print(f"[ASAAS-BACKGROUND] >>> WORKER INICIADO", flush=True)
+        print(f"[ASAAS-BACKGROUND] >>> Payload tipo: {type(payload)}", flush=True)
         
-        print(f"[ASAAS-BACKGROUND] >>> DEBUG 1: Extraindo event_type...")
-        event_type = payload.get("event") or payload.get("type")
+        try:
+            print(f"[ASAAS-BACKGROUND] >>> DEBUG 1: Extraindo event_type...", flush=True)
+            event_type = payload.get("event") or payload.get("type")
+            print(f"[ASAAS-BACKGROUND] >>> DEBUG 2: event_type={event_type}", flush=True)
+        except Exception as e:
+            print(f"[ASAAS-BACKGROUND] >>> ❌ ERRO EM DEBUG 1-2: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            raise
         print(f"[ASAAS-BACKGROUND] >>> DEBUG 2: event_type={event_type}")
         
         print(f"[ASAAS-BACKGROUND] >>> DEBUG 3: Extraindo external_event_id...")
