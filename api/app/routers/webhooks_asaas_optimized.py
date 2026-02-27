@@ -118,6 +118,10 @@ async def _process_payment_webhook(payload, db: Session):
                 db.commit()
 
     except Exception as e:
+        import traceback
+        print(f"[ASAAS-BACKGROUND] >>> ❌ ERRO FATAL: {e}")
+        print(f"[ASAAS-BACKGROUND] >>> ❌ TRACEBACK:")
+        traceback.print_exc()
         print(f"[asaas] background processing failed: {e}")
 
 
