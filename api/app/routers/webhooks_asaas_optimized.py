@@ -23,9 +23,21 @@ def _validate_asaas(request: Request):
         raise HTTPException(status_code=401, detail="invalid_asaas_webhook_token")
 
 
-async def _process_payment_webhook(payload: dict, db: Session):
+async def _process_payment_webhook(payload, db: Session):
     """Processa o pagamento em background - não bloqueia a resposta"""
     try:
+        # Converter string para dict se necessário
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+                print(f"[ASAAS-BACKGROUND] Payload convertido de string para dict")
+            except json.JSONDecodeError as e:
+                print(f"[ASAAS-BACKGROUND] Erro ao converter payload: {e}")
+                return
+        
+        print(f"[ASAAS-BACKGROUND] >>> WORKER INICIADO")
+        print(f"[ASAAS-BACKGROUND] >>> Payload tipo: {type(payload)}")
+        
         event_type = payload.get("event") or payload.get("type")
         external_event_id = payload.get("id") or payload.get("eventId")
 
