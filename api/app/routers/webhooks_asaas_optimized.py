@@ -38,19 +38,33 @@ async def _process_payment_webhook(payload, db: Session):
         print(f"[ASAAS-BACKGROUND] >>> WORKER INICIADO")
         print(f"[ASAAS-BACKGROUND] >>> Payload tipo: {type(payload)}")
         
+        print(f"[ASAAS-BACKGROUND] >>> DEBUG 1: Extraindo event_type...")
         event_type = payload.get("event") or payload.get("type")
+        print(f"[ASAAS-BACKGROUND] >>> DEBUG 2: event_type={event_type}")
+        
+        print(f"[ASAAS-BACKGROUND] >>> DEBUG 3: Extraindo external_event_id...")
         external_event_id = payload.get("id") or payload.get("eventId")
+        print(f"[ASAAS-BACKGROUND] >>> DEBUG 4: external_event_id={external_event_id}")
 
         if not event_type or not external_event_id:
+            print(f"[ASAAS-BACKGROUND] >>> DEBUG 5: Faltando event_type ou external_event_id, saindo...")
             return
 
         # Idempotência
+        print(f"[ASAAS-BACKGROUND] >>> DEBUG 6: Chamando record_event...")
         is_new = record_event(db, provider="asaas", external_id=str(external_event_id), raw=json.dumps(payload, ensure_ascii=False))
+        print(f"[ASAAS-BACKGROUND] >>> DEBUG 7: is_new={is_new}")
         if not is_new:
+            print(f"[ASAAS-BACKGROUND] >>> DEBUG 8: Evento já processado, saindo...")
             return
 
+        print(f"[ASAAS-BACKGROUND] >>> DEBUG 9: Extraindo payment...")
         payment = payload.get("payment") or {}
+        print(f"[ASAAS-BACKGROUND] >>> DEBUG 10: payment={payment}")
+        
+        print(f"[ASAAS-BACKGROUND] >>> DEBUG 11: Extraindo charge_id...")
         charge_id = payment.get("id")
+        print(f"[ASAAS-BACKGROUND] >>> DEBUG 12: charge_id={charge_id}")
 
         customer = payment.get("customer") or payload.get("customer") or {}
         customer_phone = (
