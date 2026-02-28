@@ -19,9 +19,9 @@ class CRECIValidationResult:
 
 # URLs de consulta para cada UF (quando disponíveis via API/web scraping)
 CRECI_ENDPOINTS = {
-    "SP": "https://www.crecisp.gov.br/cidadao/buscar”,  # Exemplo - verificar URL real
-    "RJ": "https://www.creci-rj.gov.br/servicos/consulta”,
-    "MG": "https://www.crecimg.gov.br/consulta”,
+    "SP": "https://www.crecisp.gov.br/cidadao/buscar",  # Exemplo - verificar URL real
+    "RJ": "https://www.creci-rj.gov.br/servicos/consulta",
+    "MG": "https://www.crecimg.gov.br/consulta",
     # ... demais estados
 }
 
