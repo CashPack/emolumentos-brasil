@@ -130,34 +130,5 @@ def calc_deed_economy(uf: str, property_value: float, db: Session = Depends(get_
     }
 
 
-@router.post("/calcular", response_model=CalcularResponse)
-def calcular_economia(request: CalcularRequest, db: Session = Depends(get_db)):
-    """
-    Endpoint simplificado para a landing page.
-    Retorna custo local, custo PRÁTICO (melhor UF) e economia.
-    """
-    uf = request.uf.strip().upper()
-    valor = request.valor
-
-    # Obtém emolumento local
-    local_result = calc_deed(uf=uf, property_value=valor, db=db)
-    custo_local = float(local_result["emolumento"])
-
-    # Obtém melhor economia
-    economy_result = calc_deed_economy(uf=uf, property_value=valor, db=db)
-    custo_pratico = float(economy_result["best"]["emolumento"])
-    economia = economy_result["economia"]
-    economia_pct = economy_result["economia_pct"]
-
-    # Calcula comissão do corretor (35% da economia, como no fluxo)
-    comissao_corretor = round(economia * 0.35, 2)
-
-    return CalcularResponse(
-        uf=uf,
-        valor=valor,
-        custo_local=custo_local,
-        custo_pratico=custo_pratico,
-        economia=economia,
-        economia_pct=economia_pct,
-        comissao_corretor=comissao_corretor,
-    )
+# Nota: O endpoint POST /calcular foi movido para main.py (raiz da API)
+# para facilitar o CORS com a landing page.

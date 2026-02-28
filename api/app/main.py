@@ -1,7 +1,7 @@
 import logging
 import sys
 
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db.session import engine, SessionLocal
@@ -12,11 +12,11 @@ from app.routers import emoluments_crud
 from app.routers import public_leads
 from app.routers import webhooks_asaas_optimized as webhooks_asaas
 from app.routers import webhooks_rmchat
-from app.routers.emoluments_calc import calcular_economia
 from app.services.seed import ensure_admin
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.db.session import get_db
+from app.models.emoluments import EmolumentBracket, EmolumentTable, TableStatus
 
 # Configuração de logging para aparecer nos logs do Render
 logging.basicConfig(
@@ -76,10 +76,81 @@ class CalcularRequest(BaseModel):
     valor: float
 
 
-@app.post("/calcular")
+class CalcularResponse(BaseModel):
+    uf: str
+    valor: float
+    custo_local: float
+    custo_pratico: float
+    economia: float
+    economia_pct: float
+    comissao_corretor: float
+
+
+def get_emolumento_for_value(uf: str, property_value: float, db: Session):
+    """Busca o emolumento para um valor específico em uma UF."""
+    t = (
+        db.query(EmolumentTable)
+        .filter(EmolumentTable.uf == uf, EmolumentTable.status == TableStatus.active)
+        .order_by(EmolumentTable.year.desc(), EmolumentTable.created_at.desc())
+        .first()
+    )
+    if not t:
+        return None
+
+    bs = (
+        db.query(EmolumentBracket)
+        .filter(EmolumentBracket.table_id == t.id, EmolumentBracket.active == True)
+        .order_by(EmolumentBracket.range_from.asc())
+        .all()
+    )
+    for b in bs:
+        if float(b.range_from) <= property_value <= float(b.range_to):
+            return float(b.amount)
+
+    # fallback: above last range
+    if bs and property_value > float(bs[-1].range_to):
+        return float(bs[-1].amount)
+
+    return None
+
+
+@app.post("/calcular", response_model=CalcularResponse)
 def calcular_landing(request: CalcularRequest, db: Session = Depends(get_db)):
     """Endpoint simplificado para calculadora da landing page."""
-    return calcular_economia(request, db)
+    uf = request.uf.strip().upper()
+    valor = request.valor
+
+    # Obtém emolumento local
+    custo_local = get_emolumento_for_value(uf, valor, db)
+    if custo_local is None:
+        raise HTTPException(404, "Tabela não encontrada para a UF informada")
+
+    # Busca o menor emolumento entre todas as UFs
+    tables = (
+        db.query(EmolumentTable)
+        .filter(EmolumentTable.status == TableStatus.active)
+        .all()
+    )
+
+    menor_emolumento = custo_local
+    for t in tables:
+        emol = get_emolumento_for_value(t.uf, valor, db)
+        if emol and emol < menor_emolumento:
+            menor_emolumento = emol
+
+    economia = round(custo_local - menor_emolumento, 2)
+    economia_pct = round((economia / custo_local) * 100, 2) if custo_local else 0
+    comissao_corretor = round(economia * 0.35, 2)
+
+    return CalcularResponse(
+        uf=uf,
+        valor=valor,
+        custo_local=custo_local,
+        custo_pratico=menor_emolumento,
+        economia=economia,
+        economia_pct=economia_pct,
+        comissao_corretor=comissao_corretor,
+    )
 
 
 app.include_router(auth.router)
