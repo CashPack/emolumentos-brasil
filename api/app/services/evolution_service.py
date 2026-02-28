@@ -11,6 +11,52 @@ EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "")
 EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "pratico-wpp")
 
 
+def send_text_message(phone: str, text: str) -> Dict[str, Any]:
+    """
+    Envia mensagem de texto simples via WhatsApp usando Evolution API
+    
+    Args:
+        phone: Número do telefone (formato: 5511999999999)
+        text: Texto da mensagem
+    
+    Returns:
+        Dict com status do envio
+    """
+    payload = {
+        "number": phone,
+        "text": text,
+        "delay": 1200
+    }
+
+    try:
+        url = f"{EVOLUTION_API_URL}/message/sendText/{EVOLUTION_INSTANCE}"
+        headers = {
+            "Content-Type": "application/json",
+            "apikey": EVOLUTION_API_KEY
+        }
+
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        
+        if response.status_code == 201:
+            return {
+                "success": True,
+                "message": "Mensagem enviada com sucesso",
+                "data": response.json()
+            }
+        else:
+            return {
+                "success": False,
+                "message": f"Erro na Evolution API: {response.status_code}",
+                "data": response.text
+            }
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Erro ao enviar mensagem: {str(e)}",
+            "data": None
+        }
+
+
 def send_validation_message(phone: str, code: str, name: str = "") -> Dict[str, Any]:
     """
     Envia mensagem de validação via WhatsApp usando Evolution API
