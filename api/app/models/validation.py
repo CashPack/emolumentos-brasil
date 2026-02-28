@@ -25,8 +25,12 @@ class ContactValidation(Base):
     webhook_data = Column(String, nullable=True)  # JSON string
 
     def is_expired(self):
-        from datetime import datetime
-        return datetime.utcnow() > self.expires_at
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        expires = self.expires_at
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        return now > expires
 
     def can_retry(self):
         return self.attempts < self.max_attempts and not self.is_expired()
