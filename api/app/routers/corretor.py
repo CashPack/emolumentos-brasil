@@ -52,11 +52,13 @@ Vou te auxiliar no cadastro de corretor parceiro.
 
 📎 *PASSO 1/5: Documento de Identidade*
 
-Envie foto do seu documento:
+Envie seu documento:
 • RG (frente e verso), OU
 • CNH (frente e verso)
 
-💡 Envie as fotos uma de cada vez.
+💡 Formatos aceitos: foto (JPG/PNG) ou arquivo PDF
+
+Envie uma foto/página por vez.
         """.strip()
         
         background_tasks.add_task(send_text_message, phone=phone, text=mensagem)
@@ -145,6 +147,8 @@ async def processar_doc1(corretor, message, phone, background_tasks, db):
 📎 *PASSO 2/5: Carteira CRECI*
 
 Envie foto da sua carteira do CRECI (frente e verso).
+
+💡 Formatos aceitos: foto (JPG/PNG) ou arquivo PDF
         """.strip()
         
         background_tasks.add_task(send_text_message, phone=phone, text=mensagem)
@@ -559,7 +563,7 @@ Após o aceite, seu cadastro estará *ATIVO*!
 # ==================== PROCESSAMENTO EM LOTE ====================
 
 async def processar_todos_documentos(corretor_id: int, phone: str):
-    """Processa todos os documentos em lote após timeout"""
+    """Processa todos os documentos em lote após timeout - suporta múltiplos formatos"""
     await asyncio.sleep(PROCESSING_DELAY)
     
     from app.db.session import SessionLocal
@@ -579,7 +583,23 @@ async def processar_todos_documentos(corretor_id: int, phone: str):
                 import requests
                 resp = requests.get(corretor.temp_doc1_url, timeout=30)
                 if resp.status_code == 200:
-                    ocr = extract_document_data(resp.content)
+                    content_type = resp.headers.get('content-type', '')
+                    file_ext = corretor.temp_doc1_url.split('.')[-1].lower() if '.' in corretor.temp_doc1_url else ''
+                    
+                    # Identifica tipo de arquivo
+                    is_pdf = 'pdf' in content_type or file_ext == 'pdf'
+                    is_image = any(img in content_type for img in ['image/jpeg', 'image/png', 'image/jpg'])
+                    
+                    print(f"[PROCESS] Doc1 - Tipo: {'PDF' if is_pdf else 'Imagem' if is_image else 'Desconhecido'}")
+                    
+                    # Processa conforme tipo
+                    if is_pdf:
+                        # Para PDFs, tenta extrair texto direto primeiro, se falhar usa OCR
+                        ocr = extract_document_data(resp.content, force_ocr=False)
+                    else:
+                        # Para imagens, sempre usa OCR
+                        ocr = extract_document_data(resp.content, force_ocr=True)
+                    
                     data = ocr.get("data", {})
                     resultados["nome"] = data.get("nome")
                     resultados["cpf"] = data.get("cpf")

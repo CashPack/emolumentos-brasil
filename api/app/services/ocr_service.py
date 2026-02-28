@@ -11,34 +11,142 @@ from typing import Dict, Any, Optional
 # DOCUMENT_AI_ENDPOINT = os.getenv("DOCUMENT_AI_ENDPOINT", "")
 
 
-def extract_document_data(image_bytes: bytes) -> Dict[str, Any]:
+def extract_document_data(file_bytes: bytes, force_ocr: bool = False, file_type: str = "auto") -> Dict[str, Any]:
     """
     Extrai dados de documentos usando OCR (Google Document AI ou similar)
+    Suporta: JPG, PNG, PDF (nativo e escaneado)
     
     Args:
-        image_bytes: Bytes da imagem do documento
+        file_bytes: Bytes do arquivo
+        force_ocr: Se True, sempre usa OCR (ignora texto nativo de PDFs)
+        file_type: Tipo de arquivo ('auto', 'image', 'pdf')
         
     Returns:
-        Dict com:
-        - document_type: rg, cnh, creci, comprovante, unknown
-        - data: dados extraídos (nome, cpf, etc)
-        - confidence: nível de confiança
+        Dict com dados extraídos
     """
-    # TODO: Implementar integração real com Google Document AI
-    # Por enquanto, analisa texto para identificar tipo de documento
+    try:
+        # Detecta tipo de arquivo se não informado
+        if file_type == "auto":
+            file_type = detect_file_type(file_bytes)
+        
+        print(f"[OCR] Tipo detectado: {file_type}, Force OCR: {force_ocr}")
+        
+        # Se for PDF e não forçar OCR, tenta extrair texto nativo primeiro
+        if file_type == "pdf" and not force_ocr:
+            texto_nativo = extract_text_from_pdf(file_bytes)
+            if texto_nativo and len(texto_nativo.strip()) > 100:  # Se tem texto suficiente
+                print(f"[OCR] PDF nativo detectado, {len(texto_nativo)} caracteres")
+                return process_extracted_text(texto_nativo, file_type)
+            else:
+                print("[OCR] PDF escaneado ou sem texto, aplicando OCR")
+        
+        # Aplica OCR (para imagens e PDFs escaneados)
+        # TODO: Implementar chamada real ao Google Document AI
+        return {
+            "document_type": "unknown",
+            "data": {},
+            "confidence": 0.0,
+            "raw_text": "",
+            "file_type": file_type,
+            "message": "OCR via Google Document AI - implementação pendente"
+        }
+        
+    except Exception as e:
+        print(f"[OCR] Erro: {e}")
+        return {
+            "document_type": "unknown",
+            "data": {},
+            "confidence": 0.0,
+            "raw_text": "",
+            "error": str(e)
+        }
+
+
+def detect_file_type(file_bytes: bytes) -> str:
+    """Detecta tipo de arquivo pelos magic numbers"""
+    # PDF começa com %PDF
+    if file_bytes[:4] == b'%PDF':
+        return "pdf"
+    # JPEG começa com FF D8
+    elif file_bytes[:2] == b'\xff\xd8':
+        return "image"
+    # PNG começa com 89 50 4E 47
+    elif file_bytes[:4] == b'\x89PNG':
+        return "image"
+    else:
+        return "unknown"
+
+
+def extract_text_from_pdf(pdf_bytes: bytes) -> str:
+    """Extrai texto nativo de PDF (sem OCR)"""
+    try:
+        import PyPDF2
+        from io import BytesIO
+        
+        pdf_file = BytesIO(pdf_bytes)
+        reader = PyPDF2.PdfReader(pdf_file)
+        
+        texto = ""
+        for page in reader.pages:
+            texto += page.extract_text() + "\n"
+        
+        return texto
+    except Exception as e:
+        print(f"[OCR] Erro ao extrair texto de PDF: {e}")
+        return ""
+
+
+def process_extracted_text(text: str, file_type: str) -> Dict[str, Any]:
+    """Processa texto extraído e identifica documento"""
+    import re
     
-    # Detecta tipo de documento baseado em padrões do OCR
-    # Nota: implementação real vai usar a API do Google
+    text_upper = text.upper()
     
-    detected_type = detect_document_type(image_bytes)
+    # Detecta tipo de documento
+    doc_type = "unknown"
+    if any(kw in text_upper for kw in ['REGISTRO GERAL', 'CARTEIRA DE IDENTIDADE', 'IDENTIDADE']):
+        doc_type = "rg"
+    elif any(kw in text_upper for kw in ['CARTEIRA NACIONAL DE HABILITAÇÃO', 'CNH', 'HABILITAÇÃO']):
+        doc_type = "cnh"
+    elif any(kw in text_upper for kw in ['CRECI', 'CORRETOR', 'IMÓVEIS']):
+        doc_type = "creci"
+    elif any(kw in text_upper for kw in ['CONTA DE LUZ', 'CONTA DE ÁGUA', 'TELEFONE', 'ENERGIA']):
+        doc_type = "comprovante"
+    
+    # Extrai dados comuns
+    dados = {}
+    
+    # Nome (padrões comuns)
+    nome_match = re.search(r'NOME[:\s]+([A-Z\s]+)(?=CPF|NASC|IDENT|$)', text_upper, re.MULTILINE)
+    if nome_match:
+        dados["nome"] = nome_match.group(1).strip().title()
+    
+    # CPF
+    cpf_match = re.search(r'(\d{3}\.?\d{3}\.?\d{3}-?\d{2})', text)
+    if cpf_match:
+        dados["cpf"] = cpf_match.group(1).replace('.', '').replace('-', '')
+    
+    # Data de nascimento
+    data_match = re.search(r'(\d{2}/\d{2}/\d{4})', text)
+    if data_match:
+        dados["data_nascimento"] = data_match.group(1)
     
     return {
-        "document_type": detected_type,
-        "data": {},
-        "confidence": 0.0,
-        "raw_text": "",
-        "message": "OCR não implementado - usar modelo local"
+        "document_type": doc_type,
+        "data": dados,
+        "confidence": 0.8,
+        "raw_text": text[:1000],  # Primeiros 1000 caracteres
+        "file_type": file_type,
+        "extraction_method": "native_pdf"
     }
+
+
+def detect_document_type(image_bytes: bytes) -> str:
+    """
+    Tenta identificar tipo de documento baseado em características
+    """
+    # Placeholder - implementação real vai analisar o OCR
+    return "unknown"
 
 
 def detect_document_type(image_bytes: bytes) -> str:
