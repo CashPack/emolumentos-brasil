@@ -66,6 +66,11 @@ class Corretor(Base):
     contrato_assinado = Column(Boolean, default=False)
     contrato_assinado_at = Column(DateTime(timezone=True), nullable=True)
     
+    # Campos para fluxo otimizado de coleta única
+    last_document_received_at = Column(DateTime(timezone=True), nullable=True)
+    temp_documents = Column(Text, nullable=True)  # JSON array de documentos acumulados
+    dados_extraidos = Column(Text, nullable=True)  # JSON com dados do OCR
+    
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

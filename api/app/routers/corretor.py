@@ -1,12 +1,13 @@
 """
-Módulo 0 - Cadastro de Corretores
+Módulo 0 - Cadastro de Corretores (Fluxo Otimizado - Coleta Única)
 Endpoint para onboarding de corretores parceiros via WhatsApp
 """
 import os
 import json
 import uuid
-from datetime import datetime
-from typing import Optional, List
+import asyncio
+from datetime import datetime, timedelta
+from typing import Optional, List, Dict, Any
 
 from fastapi import (
     APIRouter, Request, Depends, HTTPException, 
@@ -18,12 +19,16 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.corretor import Corretor, DocumentStatus
 from app.services.evolution_service import send_text_message
-from app.services.ocr_service import extract_document_data
+from app.services.ocr_service import extract_document_data, detect_document_type
 from app.services.creci_validator import validate_creci
 from app.services.asaas_service import create_asaas_account
+from app.services.contract_generator import generate_partnership_contract, CorretorData
 
 router = APIRouter(prefix="/api/corretor", tags=["Module 0 - Cadastro Corretor"])
 
+# ==================== CONFIGURAÇÕES ====================
+DOCUMENT_COLLECTION_TIMEOUT = 30  # segundos para aguardar mais documentos
+MIN_DOCUMENTS_REQUIRED = 3  # RG/CNH, CRECI, Comprovante
 
 # ==================== MODELOS DE REQUISIÇÃO/RESPOSTA ====================
 
@@ -39,37 +44,28 @@ class StartCadastroResponse(BaseModel):
     next_step: str
 
 
-class DocumentUploadResponse(BaseModel):
-    success: bool
-    document_type: str
-    status: str
-    extracted_data: Optional[dict] = None
-    message: str
-
-
-class DadosPessoaisRequest(BaseModel):
+class ConfirmDataRequest(BaseModel):
     cadastro_id: str
-    nome: str
-    cpf: str
-    data_nascimento: str
-    creci_numero: str
-    creci_uf: str
-    email: str
+    confirmacoes: Dict[str, bool]  # {"nome": true, "cpf": true, ...}
+    correcoes: Optional[Dict[str, str]] = None  # {"nome": "Nome Correto"}
+    email: str  # Email necessário para Asaas
 
 
-class DadosPessoaisResponse(BaseModel):
+class ConfirmDataResponse(BaseModel):
     success: bool
     creci_valido: bool
     asaas_account: Optional[dict] = None
     message: str
+    pendencias: Optional[List[str]] = None
 
 
 class CadastroStatusResponse(BaseModel):
     cadastro_id: str
     status: str
-    progresso: int  # 0-100%
-    documentos: dict
-    dados_pessoais: Optional[dict]
+    progresso: int
+    documentos_recebidos: List[str]
+    dados_extraidos: Optional[Dict]
+    pendencias: List[str]
     contrato_gerado: bool
     contrato_url: Optional[str]
 
@@ -83,41 +79,41 @@ async def iniciar_cadastro(
     db: Session = Depends(get_db)
 ):
     """
-    Inicia processo de cadastro de corretor.
-    
-    Envia mensagem de boas-vindas via WhatsApp com instruções.
+    Inicia processo de cadastro de corretor com fluxo otimizado de coleta única.
     """
     try:
-        # Gera ID único para o cadastro
         cadastro_id = str(uuid.uuid4())[:8]
         
-        # Cria registro no banco
         corretor = Corretor(
             cadastro_id=cadastro_id,
             phone=request.phone,
             nome=request.name or "",
-            status="iniciado",
-            created_at=datetime.utcnow()
+            status="aguardando_documentos",
+            created_at=datetime.utcnow(),
+            doc_rg_status="pendente",
+            doc_creci_status="pendente",
+            doc_comprovante_status="pendente"
         )
         db.add(corretor)
         db.commit()
         
-        # Envia mensagem de boas-vindas via WhatsApp
+        # Mensagem otimizada - instruções de coleta única
         mensagem = f"""
 👋 Bem-vindo à PRÁTICO Documentos!
 
-Sou seu assistente para o cadastro de corretor parceiro. 
+Sou seu assistente para cadastro de corretor parceiro. 
 
-Para prosseguir, vou precisar de alguns documentos:
+📋 Para agilizar seu cadastro, envie *TODOS OS DOCUMENTOS DE UMA VEZ*:
 
-📄 *Documentos necessários:*
-1️⃣ RG ou CNH (foto frente e verso)
-2️⃣ Carteira do CRECI (frente e verso) 
-3️⃣ Comprovante de residência
+1️⃣ *RG ou CNH* (foto da frente E verso)
+2️⃣ *Carteira do CRECI* (foto da frente E verso)  
+3️⃣ *Comprovante de residência* (foto)
 
-Envie os documentos *um por vez*, enviando a foto diretamente aqui no WhatsApp.
+💡 *Dica:* Envie tudo em sequência, sem esperar resposta entre um e outro. Assim que receber todos, processo automaticamente!
 
 Seu código de cadastro: *{cadastro_id}*
+
+⏱️ Tempo estimado: 2 minutos
         """.strip()
         
         background_tasks.add_task(
@@ -129,8 +125,8 @@ Seu código de cadastro: *{cadastro_id}*
         return StartCadastroResponse(
             success=True,
             cadastro_id=cadastro_id,
-            message="Cadastro iniciado. Verifique seu WhatsApp.",
-            next_step="enviar_documentos"
+            message="Cadastro iniciado. Envie todos os documentos de uma vez.",
+            next_step="enviar_todos_documentos"
         )
         
     except Exception as e:
@@ -145,23 +141,14 @@ async def receber_documento_webhook(
     db: Session = Depends(get_db)
 ):
     """
-    Webhook para receber documentos enviados via WhatsApp (Evolution API).
-    
-    Processa automaticamente:
-    1. Recebe imagem/documento
-    2. Baixa arquivo
-    3. Identifica tipo de documento (RG, CNH, CRECI, Comprovante)
-    4. Extrai dados via OCR (Google Document AI)
-    5. Atualiza cadastro no banco
+    Webhook para receber documentos enviados via WhatsApp.
+    Acumula documentos e processa em lote após timeout.
     """
     try:
         data = await request.json()
-        
-        # Extrai informações do webhook da Evolution
         event = data.get("event", "")
         message_data = data.get("data", {})
         
-        # Só processa mensagens com mídia (imagem/documento)
         if event not in ["messages.upsert"]:
             return {"success": True, "message": "Evento ignorado"}
         
@@ -169,21 +156,19 @@ async def receber_documento_webhook(
         remote_jid = message.get("remoteJid", "")
         phone = remote_jid.split("@")[0]
         
-        # Verifica se há mídia (imagem)
         has_image = "imageMessage" in message
         has_document = "documentMessage" in message
         
         if not has_image and not has_document:
             return {"success": True, "message": "Mensagem sem mídia"}
         
-        # Busca cadastro ativo para este número
+        # Busca ou cria cadastro ativo
         corretor = db.query(Corretor).filter(
             Corretor.phone == phone,
-            Corretor.status.in_(["iniciado", "documentos_pendentes", "aguardando_dados"])
+            Corretor.status.in_(["iniciado", "aguardando_documentos", "recebendo_documentos"])
         ).order_by(Corretor.created_at.desc()).first()
         
         if not corretor:
-            # Envia mensagem orientando a iniciar cadastro primeiro
             background_tasks.add_task(
                 send_text_message,
                 phone=phone,
@@ -201,26 +186,52 @@ async def receber_documento_webhook(
         if not media_url:
             return {"success": False, "message": "URL da mídia não encontrada"}
         
-        # Processa documento em background
+        # Atualiza status para "recebendo_documentos"
+        corretor.status = "recebendo_documentos"
+        corretor.last_document_received_at = datetime.utcnow()
+        db.commit()
+        
+        # Acumula documento temporariamente
+        # Os documentos são armazenados em uma lista temporária no banco
+        documentos_pendentes = json.loads(corretor.temp_documents or "[]")
+        documentos_pendentes.append({
+            "url": media_url,
+            "received_at": datetime.utcnow().isoformat()
+        })
+        corretor.temp_documents = json.dumps(documentos_pendentes)
+        db.commit()
+        
+        # Agenda processamento em lote após timeout
+        # Se já existe uma tarefa agendada, cancela e recria
         background_tasks.add_task(
-            processar_documento,
+            processar_documentos_em_lote,
             corretor_id=corretor.id,
             cadastro_id=corretor.cadastro_id,
             phone=phone,
-            media_url=media_url,
+            delay_seconds=DOCUMENT_COLLECTION_TIMEOUT,
             db_session_factory=get_db
         )
         
-        # Envia confirmação imediata
+        # Conta documentos recebidos
+        count = len(documentos_pendentes)
+        
+        if count == 1:
+            mensagem = f"📎 Documento {count} recebido! Aguardando mais {MIN_DOCUMENTS_REQUIRED - 1}..."
+        elif count < MIN_DOCUMENTS_REQUIRED:
+            mensagem = f"📎 Documento {count} recebido! Envie mais {MIN_DOCUMENTS_REQUIRED - count}..."
+        else:
+            mensagem = f"✅ {count} documentos recebidos! Processando em {DOCUMENT_COLLECTION_TIMEOUT}s..."
+        
         background_tasks.add_task(
             send_text_message,
             phone=phone,
-            text="📎 Documento recebido! Estou processando..."
+            text=mensagem
         )
         
         return {
             "success": True,
-            "message": "Documento recebido e em processamento",
+            "message": f"Documento {count} acumulado",
+            "total_recebidos": count,
             "cadastro_id": corretor.cadastro_id
         }
         
@@ -229,21 +240,185 @@ async def receber_documento_webhook(
         return {"success": False, "error": str(e)}
 
 
-@router.post("/dados-pessoais", response_model=DadosPessoaisResponse)
-async def receber_dados_pessoais(
-    request: DadosPessoaisRequest,
+async def processar_documentos_em_lote(
+    corretor_id: int,
+    cadastro_id: str,
+    phone: str,
+    delay_seconds: int,
+    db_session_factory
+):
+    """
+    Processa todos os documentos acumulados em lote.
+    Aguarda timeout e então processa tudo de uma vez.
+    """
+    # Aguarda timeout para receber mais documentos
+    await asyncio.sleep(delay_seconds)
+    
+    from app.db.session import SessionLocal
+    db = SessionLocal()
+    
+    try:
+        corretor = db.query(Corretor).filter(Corretor.id == corretor_id).first()
+        if not corretor or corretor.status != "recebendo_documentos":
+            print(f"[LOTE] Cadastro {cadastro_id} não está mais em recebimento")
+            return
+        
+        # Recupera documentos acumulados
+        documentos = json.loads(corretor.temp_documents or "[]")
+        
+        if not documentos:
+            send_text_message(phone, "⚠️ Nenhum documento recebido. Por favor, envie os documentos.")
+            return
+        
+        print(f"[LOTE] Processando {len(documentos)} documentos para {cadastro_id}")
+        
+        # Processa cada documento
+        resultados = {
+            "rg_cnh": [],
+            "creci": [],
+            "comprovante": [],
+            "nao_identificado": []
+        }
+        
+        dados_extraidos = {
+            "nome": None,
+            "cpf": None,
+            "data_nascimento": None,
+            "creci_numero": None,
+            "creci_uf": None,
+            "endereco": None
+        }
+        
+        for idx, doc in enumerate(documentos):
+            try:
+                # Baixa imagem
+                import requests
+                response = requests.get(doc["url"], timeout=30)
+                if response.status_code != 200:
+                    continue
+                
+                image_bytes = response.content
+                
+                # Detecta tipo via OCR
+                ocr_result = extract_document_data(image_bytes)
+                doc_type = ocr_result.get("document_type", "unknown")
+                extracted = ocr_result.get("data", {})
+                
+                print(f"[LOTE] Doc {idx+1}: tipo={doc_type}")
+                
+                # Categoriza documento
+                if doc_type in ["rg", "cnh"]:
+                    resultados["rg_cnh"].append(doc)
+                    corretor.doc_rg_url = doc["url"]
+                    corretor.doc_rg_status = "processado"
+                    
+                    # Extrai dados pessoais
+                    if not dados_extraidos["nome"] and "nome" in extracted:
+                        dados_extraidos["nome"] = extracted["nome"]
+                    if not dados_extraidos["cpf"] and "cpf" in extracted:
+                        dados_extraidos["cpf"] = extracted["cpf"]
+                    if not dados_extraidos["data_nascimento"] and "data_nascimento" in extracted:
+                        dados_extraidos["data_nascimento"] = extracted["data_nascimento"]
+                        
+                elif doc_type == "creci":
+                    resultados["creci"].append(doc)
+                    corretor.doc_creci_url = doc["url"]
+                    corretor.doc_creci_status = "processado"
+                    
+                    if not dados_extraidos["creci_numero"] and "creci_numero" in extracted:
+                        dados_extraidos["creci_numero"] = extracted["creci_numero"]
+                    if not dados_extraidos["creci_uf"] and "creci_uf" in extracted:
+                        dados_extraidos["creci_uf"] = extracted["creci_uf"]
+                        
+                elif doc_type == "comprovante":
+                    resultados["comprovante"].append(doc)
+                    corretor.doc_comprovante_url = doc["url"]
+                    corretor.doc_comprovante_status = "processado"
+                    
+                    if not dados_extraidos["endereco"] and "endereco" in extracted:
+                        dados_extraidos["endereco"] = extracted["endereco"]
+                else:
+                    resultados["nao_identificado"].append(doc)
+                    
+            except Exception as e:
+                print(f"[LOTE] Erro ao processar doc {idx+1}: {e}")
+        
+        # Salva dados extraídos temporiamente
+        corretor.dados_extraidos = json.dumps(dados_extraidos)
+        corretor.status = "dados_extraidos"
+        db.commit()
+        
+        # Monta lista de pendências
+        pendencias = []
+        if not resultados["rg_cnh"]:
+            pendencias.append("RG ou CNH não identificado")
+        if not resultados["creci"]:
+            pendencias.append("Carteira CRECI não identificada")
+        if not resultados["comprovante"]:
+            pendencias.append("Comprovante de residência não identificado")
+        if not dados_extraidos["nome"]:
+            pendencias.append("Nome não extraído dos documentos")
+        if not dados_extraidos["cpf"]:
+            pendencias.append("CPF não extraído dos documentos")
+        if not dados_extraidos["creci_numero"]:
+            pendencias.append("Número do CRECI não extraído")
+        
+        # Monta resposta para o usuário
+        mensagem = montar_mensagem_confirmacao(dados_extraidos, pendencias, len(documentos))
+        send_text_message(phone, mensagem)
+        
+        print(f"[LOTE] Processamento completo. Pendências: {len(pendencias)}")
+        
+    except Exception as e:
+        print(f"[LOTE] Erro: {e}")
+        send_text_message(phone, "❌ Erro ao processar documentos. Tente novamente ou entre em contato com o suporte.")
+    finally:
+        db.close()
+
+
+def montar_mensagem_confirmacao(dados: Dict, pendencias: List[str], total_docs: int) -> str:
+    """Monta mensagem de confirmação com dados extraídos e pendências"""
+    
+    msg = f"✅ {total_docs} documentos processados!\n\n"
+    msg += "📋 *Dados identificados:*\n\n"
+    
+    if dados["nome"]:
+        msg += f"👤 Nome: *{dados['nome']}*\n"
+    if dados["cpf"]:
+        cpf_formatado = f"{dados['cpf'][:3]}.{dados['cpf'][3:6]}.{dados['cpf'][6:9]}-{dados['cpf'][9:]}"
+        msg += f"🆔 CPF: *{cpf_formatado}*\n"
+    if dados["data_nascimento"]:
+        msg += f"🎂 Nascimento: *{dados['data_nascimento']}*\n"
+    if dados["creci_numero"]:
+        uf = dados.get("creci_uf", "UF")
+        msg += f"🏷️ CRECI: *{dados['creci_numero']}/{uf}*\n"
+    if dados["endereco"]:
+        msg += f"📍 Endereço: *{dados['endereco'][:50]}...*\n"
+    
+    if pendencias:
+        msg += "\n⚠️ *Precisamos corrigir:*\n"
+        for idx, p in enumerate(pendencias, 1):
+            msg += f"{idx}. {p}\n"
+        msg += "\n📎 *Envie os documentos faltantes ou digite os dados:*\n"
+        msg += "_Exemplo: NOME: João Silva, CPF: 12345678900_"
+    else:
+        msg += "\n🎉 *Todos os dados identificados!*\n"
+        msg += "Por favor, confirme seu email para prosseguir:"
+    
+    return msg
+
+
+@router.post("/confirmar-dados", response_model=ConfirmDataResponse)
+async def confirmar_dados(
+    request: ConfirmDataRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     """
-    Recebe dados pessoais do corretor após extração OCR.
-    
-    Valida:
-    1. CRECI na UF informada
-    2. Cria conta Asaas para split de pagamentos
+    Recebe confirmações/correções dos dados e finaliza cadastro.
+    Valida CRECI, cria conta Asaas e gera contrato.
     """
     try:
-        # Busca cadastro
         corretor = db.query(Corretor).filter(
             Corretor.cadastro_id == request.cadastro_id
         ).first()
@@ -251,85 +426,133 @@ async def receber_dados_pessoais(
         if not corretor:
             raise HTTPException(status_code=404, detail="Cadastro não encontrado")
         
-        # Atualiza dados
-        corretor.nome = request.nome
-        corretor.cpf = request.cpf
-        corretor.data_nascimento = request.data_nascimento
-        corretor.creci_numero = request.creci_numero
-        corretor.creci_uf = request.creci_uf.upper()
+        # Recupera dados extraídos
+        dados_extraidos = json.loads(corretor.dados_extraidos or "{}")
+        
+        # Aplica confirmações e correções
+        dados_finais = {}
+        for campo, confirmado in request.confirmacoes.items():
+            if confirmado:
+                dados_finais[campo] = dados_extraidos.get(campo)
+            elif request.correcoes and campo in request.correcoes:
+                dados_finais[campo] = request.correcoes[campo]
+        
+        # Verifica se tem dados mínimos
+        campos_obrigatorios = ["nome", "cpf", "creci_numero"]
+        faltando = [c for c in campos_obrigatorios if not dados_finais.get(c)]
+        
+        if faltando:
+            return ConfirmDataResponse(
+                success=False,
+                creci_valido=False,
+                message=f"Dados incompletos. Faltando: {', '.join(faltando)}",
+                pendencias=faltando
+            )
+        
+        # Atualiza cadastro
+        corretor.nome = dados_finais["nome"]
+        corretor.cpf = dados_finais["cpf"]
+        corretor.data_nascimento = dados_finais.get("data_nascimento")
+        corretor.creci_numero = dados_finais["creci_numero"]
+        corretor.creci_uf = dados_finais.get("creci_uf", "SP")
         corretor.email = request.email
         corretor.status = "validando_creci"
         db.commit()
         
-        # Valida CRECI em background
+        # Valida CRECI
         creci_result = await validate_creci(
-            numero=request.creci_numero,
-            uf=request.creci_uf
+            numero=corretor.creci_numero,
+            uf=corretor.creci_uf
         )
         
         if not creci_result.get("valido", False):
             corretor.status = "creci_invalido"
             db.commit()
-            return DadosPessoaisResponse(
+            return ConfirmDataResponse(
                 success=False,
                 creci_valido=False,
-                message=f"CRECI inválido: {creci_result.get('mensagem', 'Não foi possível validar')}"
+                message=f"CRECI inválido: {creci_result.get('mensagem', 'Não foi possível validar')}",
+                pendencias=["CRECI inválido - verifique número e UF"]
             )
         
         corretor.creci_validado = True
         corretor.status = "criando_asaas"
         db.commit()
         
-        # Cria conta no Asaas
+        # Cria conta Asaas
         asaas_result = await create_asaas_account(
-            nome=request.nome,
-            cpf=request.cpf,
-            email=request.email,
-            phone=corretor.phone
+            nome=corretor.nome,
+            cpf=corretor.cpf,
+            email=corretor.email,
+            phone=corretor.phone,
+            external_reference=corretor.cadastro_id
         )
         
         if asaas_result.get("success", False):
             corretor.asaas_customer_id = asaas_result.get("customer_id")
             corretor.asaas_wallet_id = asaas_result.get("wallet_id")
-            corretor.status = "conta_criada"
+            corretor.status = "gerando_contrato"
             db.commit()
             
-            # Envia notificação
+            # Gera contrato
+            corretor_data = CorretorData(
+                nome=corretor.nome,
+                cpf=corretor.cpf,
+                creci_numero=corretor.creci_numero,
+                creci_uf=corretor.creci_uf,
+                email=corretor.email,
+                phone=corretor.phone
+            )
+            
+            contrato = generate_partnership_contract(corretor_data)
+            corretor.contrato_gerado = True
+            corretor.contrato_url = contrato.get("assinatura_url")
+            corretor.status = "aguardando_assinatura"
+            db.commit()
+            
+            # Mensagem de sucesso
             background_tasks.add_task(
                 send_text_message,
                 phone=corretor.phone,
                 text=f"""
-✅ Dados validados e conta criada!
+🎉 Cadastro quase completo!
 
-Seu CRECI foi validado com sucesso.
-Sua conta para recebimento de comissões está configurada.
+✅ Dados validados
+✅ CRECI confirmado  
+✅ Conta Asaas criada
+✅ Contrato gerado
 
-Próximo passo: assinatura do contrato de parceria.
+📄 *Próximo passo:* Assine o contrato digital
+
+Link para assinatura: {contrato.get('assinatura_url') or 'Em breve'}
+
+Após assinar, seu cadastro estará ativo e você poderá começar a indicar clientes!
                 """.strip()
             )
             
-            return DadosPessoaisResponse(
+            return ConfirmDataResponse(
                 success=True,
                 creci_valido=True,
                 asaas_account={
                     "customer_id": asaas_result.get("customer_id"),
                     "wallet_id": asaas_result.get("wallet_id")
                 },
-                message="Dados validados e conta Asaas criada com sucesso!"
+                message="Cadastro finalizado! Aguardando assinatura do contrato."
             )
         else:
             corretor.status = "erro_asaas"
             db.commit()
-            return DadosPessoaisResponse(
+            return ConfirmDataResponse(
                 success=False,
                 creci_valido=True,
-                message=f"Erro ao criar conta Asaas: {asaas_result.get('error', 'Erro desconhecido')}"
+                message=f"Erro ao criar conta Asaas: {asaas_result.get('error', 'Erro desconhecido')}",
+                pendencias=["Erro na criação da conta de pagamentos"]
             )
             
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[DADOS PESSOAIS] Erro: {e}")
+        print(f"[CONFIRMAR] Erro: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -338,9 +561,7 @@ async def consultar_status(
     cadastro_id: str,
     db: Session = Depends(get_db)
 ):
-    """
-    Consulta status completo do cadastro do corretor.
-    """
+    """Consulta status completo do cadastro do corretor."""
     try:
         corretor = db.query(Corretor).filter(
             Corretor.cadastro_id == cadastro_id
@@ -351,36 +572,56 @@ async def consultar_status(
         
         # Calcula progresso
         progresso = 0
-        documentos = {
-            "rg_cnh": corretor.doc_rg_status or "pendente",
-            "creci": corretor.doc_creci_status or "pendente",
-            "comprovante": corretor.doc_comprovante_status or "pendente"
-        }
+        docs_recebidos = []
         
-        # Conta documentos enviados
-        docs_enviados = sum(1 for d in documentos.values() if d in ["recebido", "processado"])
-        progresso += (docs_enviados / 3) * 40  # 40% para documentos
-        
+        if corretor.doc_rg_status == "processado":
+            docs_recebidos.append("RG/CNH")
+            progresso += 20
+        if corretor.doc_creci_status == "processado":
+            docs_recebidos.append("CRECI")
+            progresso += 20
+        if corretor.doc_comprovante_status == "processado":
+            docs_recebidos.append("Comprovante")
+            progresso += 10
+        if corretor.dados_extraidos:
+            progresso += 20
         if corretor.creci_validado:
-            progresso += 30  # 30% para validação CRECI
-        
+            progresso += 15
         if corretor.asaas_wallet_id:
-            progresso += 20  # 20% para conta Asaas
+            progresso += 10
+        if corretor.contrato_gerado:
+            progresso += 5
         
-        if corretor.contrato_assinado:
-            progresso += 10  # 10% para contrato
+        # Identifica pendências
+        pendencias = []
+        dados = json.loads(corretor.dados_extraidos or "{}")
+        
+        if corretor.status in ["aguardando_documentos", "recebendo_documentos"]:
+            if corretor.doc_rg_status != "processado":
+                pendencias.append("RG ou CNH")
+            if corretor.doc_creci_status != "processado":
+                pendencias.append("Carteira CRECI")
+            if corretor.doc_comprovante_status != "processado":
+                pendencias.append("Comprovante de residência")
+        elif corretor.status == "dados_extraidos":
+            if not dados.get("nome"):
+                pendencias.append("Confirmação do nome")
+            if not dados.get("cpf"):
+                pendencias.append("Confirmação do CPF")
+            if not dados.get("creci_numero"):
+                pendencias.append("Confirmação do CRECI")
+            if not corretor.email:
+                pendencias.append("Email para cadastro")
+        elif corretor.status == "aguardando_assinatura":
+            pendencias.append("Assinatura do contrato")
         
         return CadastroStatusResponse(
             cadastro_id=cadastro_id,
             status=corretor.status,
-            progresso=int(progresso),
-            documentos=documentos,
-            dados_pessoais={
-                "nome": corretor.nome,
-                "cpf": corretor.cpf,
-                "creci": f"{corretor.creci_numero}/{corretor.creci_uf}" if corretor.creci_numero else None,
-                "email": corretor.email
-            } if corretor.nome else None,
+            progresso=min(progresso, 100),
+            documentos_recebidos=docs_recebidos,
+            dados_extraidos=dados,
+            pendencias=pendencias,
             contrato_gerado=corretor.contrato_gerado,
             contrato_url=corretor.contrato_url
         )
@@ -391,110 +632,53 @@ async def consultar_status(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ==================== FUNÇÕES AUXILIARES ====================
-
-def processar_documento(
-    corretor_id: int,
+@router.post("/assinatura-contrato/{cadastro_id}")
+async def registrar_assinatura_contrato(
     cadastro_id: str,
-    phone: str,
-    media_url: str,
-    db_session_factory
+    request: Request,
+    db: Session = Depends(get_db)
 ):
     """
-    Processa documento recebido:
-    1. Baixa imagem
-    2. Identifica tipo via OCR
-    3. Extrai dados
-    4. Atualiza banco
-    5. Envia confirmação
+    Webhook para receber confirmação de assinatura do contrato
     """
-    from app.db.session import SessionLocal
-    db = SessionLocal()
-    
     try:
-        corretor = db.query(Corretor).filter(Corretor.id == corretor_id).first()
+        corretor = db.query(Corretor).filter(
+            Corretor.cadastro_id == cadastro_id
+        ).first()
+        
         if not corretor:
-            print(f"[PROCESSAR] Corretor {corretor_id} não encontrado")
-            return
+            raise HTTPException(status_code=404, detail="Cadastro não encontrado")
         
-        # Baixa imagem
-        import requests
-        response = requests.get(media_url, timeout=30)
-        if response.status_code != 200:
-            print(f"[PROCESSAR] Erro ao baixar imagem: {response.status_code}")
-            return
-        
-        image_bytes = response.content
-        print(f"[PROCESSAR] Imagem baixada: {len(image_bytes)} bytes")
-        
-        # Identifica tipo de documento via OCR
-        ocr_result = extract_document_data(image_bytes)
-        doc_type = ocr_result.get("document_type", "unknown")
-        
-        print(f"[PROCESSAR] Tipo detectado: {doc_type}")
-        
-        # Atualiza cadastro conforme tipo
-        if doc_type in ["rg", "cnh"]:
-            corretor.doc_rg_url = media_url
-            corretor.doc_rg_status = "processado"
-            corretor.doc_rg_data = json.dumps(ocr_result.get("data", {}))
-            
-            # Extrai dados se possível
-            if "nome" in ocr_result.get("data", {}):
-                corretor.nome_temp = ocr_result["data"]["nome"]
-            if "cpf" in ocr_result.get("data", {}):
-                corretor.cpf_temp = ocr_result["data"]["cpf"]
-                
-        elif doc_type == "creci":
-            corretor.doc_creci_url = media_url
-            corretor.doc_creci_status = "processado"
-            corretor.doc_creci_data = json.dumps(ocr_result.get("data", {}))
-            
-            # Extrai número e UF do CRECI
-            if "creci_numero" in ocr_result.get("data", {}):
-                corretor.creci_numero_temp = ocr_result["data"]["creci_numero"]
-            if "creci_uf" in ocr_result.get("data", {}):
-                corretor.creci_uf_temp = ocr_result["data"]["creci_uf"]
-                
-        elif doc_type == "comprovante":
-            corretor.doc_comprovante_url = media_url
-            corretor.doc_comprovante_status = "processado"
-            corretor.doc_comprovante_data = json.dumps(ocr_result.get("data", {}))
-        
-        # Atualiza status geral
-        if corretor.doc_rg_status == "processado" and corretor.doc_creci_status == "processado" and corretor.doc_comprovante_status == "processado":
-            corretor.status = "aguardando_dados"
-        else:
-            corretor.status = "documentos_pendentes"
-        
+        corretor.contrato_assinado = True
+        corretor.contrato_assinado_at = datetime.utcnow()
+        corretor.status = "ativo"
+        corretor.ativo_desde = datetime.utcnow()
         db.commit()
         
-        # Envia confirmação
-        tipo_nome = {"rg": "RG", "cnh": "CNH", "creci": "CRECI", "comprovante": "Comprovante de Residência"}.get(doc_type, "Documento")
+        # Envia mensagem de boas-vindas
         send_text_message(
-            phone=phone,
-            text=f"✅ {tipo_nome} processado com sucesso!\n\nDados extraídos via OCR."
+            corretor.phone,
+            f"""
+🎉 *PARABÉNS! Seu cadastro está ATIVO!*
+
+Bem-vindo à PRÁTICO Documentos, {corretor.nome}!
+
+✅ Você agora pode indicar clientes e ganhar comissões de até 35%.
+
+📱 *Como funciona:*
+1. Indique clientes para escrituras digitais
+2. Acompanhe pelo seu painel
+3. Receba comissões automaticamente
+
+🔗 Acesse seu painel: https://admin.praticodocumentos.com.br
+
+🚀 Boa sorte e ótimas vendas!
+            """.strip()
         )
         
-        # Se todos documentos enviados, solicita confirmação de dados
-        if corretor.status == "aguardando_dados":
-            send_text_message(
-                phone=phone,
-                text=f"""
-🎉 Todos os documentos recebidos!
-
-Dados extraídos:
-👤 Nome: {corretor.nome_temp or 'Não identificado'}
-🆔 CPF: {corretor.cpf_temp or 'Não identificado'}
-🏷️ CRECI: {corretor.creci_numero_temp or 'Não identificado'}/{corretor.creci_uf_temp or ''}
-
-Por favor, confirme ou corrija estes dados para prosseguir.
-                """.strip()
-            )
+        return {"success": True, "message": "Cadastro ativado com sucesso!"}
         
-        print(f"[PROCESSAR] Documento {doc_type} processado para {cadastro_id}")
-        
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"[PROCESSAR] Erro: {e}")
-    finally:
-        db.close()
+        raise HTTPException(status_code=500, detail=str(e))
