@@ -12,11 +12,6 @@ from app.routers import emoluments_crud
 from app.routers import public_leads
 from app.routers import webhooks_asaas_optimized as webhooks_asaas
 from app.routers import webhooks_rmchat
-from app.routers import modules_3_to_6
-from app.routers import module3_validate
-from app.routers import module4_documents
-from app.routers import module5_drafts
-from app.routers import module6_proxy
 from app.routers.emoluments_calc import calcular_economia
 from app.services.seed import ensure_admin
 from pydantic import BaseModel
@@ -87,8 +82,3 @@ app.include_router(emoluments_crud.router)
 app.include_router(public_leads.router)
 app.include_router(webhooks_asaas.router)
 app.include_router(webhooks_rmchat.router)
-app.include_router(modules_3_to_6.router)
-app.include_router(module3_validate.router)
-app.include_router(module4_documents.router)
-app.include_router(module5_drafts.router)
-app.include_router(module6_proxy.router)
