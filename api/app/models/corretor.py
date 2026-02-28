@@ -54,11 +54,22 @@ class Corretor(Base):
     asaas_customer_id = Column(String, nullable=True)
     asaas_wallet_id = Column(String, nullable=True)
     
+    # Campos para fluxo guiado (Doc1 → Doc2 → Doc3 → Endereço)
+    temp_doc1_url = Column(String, nullable=True)  # RG/CNH
+    temp_doc2_url = Column(String, nullable=True)  # CRECI
+    temp_doc3_url = Column(String, nullable=True)  # Comprovante
+    endereco = Column(String, nullable=True)
+    endereco_fonte = Column(String, nullable=True)  # 'digitado' ou 'ocr'
+    all_docs_received_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Dados extraídos do OCR (JSON)
+    dados_extraidos = Column(Text, nullable=True)
+    
     # Status do cadastro
-    status = Column(String, default="iniciado")
-    # iniciado, documentos_pendentes, aguardando_dados, validando_creci, 
-    # creci_invalido, criando_asaas, conta_criada, gerando_contrato,
-    # aguardando_assinatura, ativo, erro_asaas, cancelado
+    status = Column(String, default="aguardando_doc1")
+    # aguardando_doc1, aguardando_doc2, aguardando_doc3, aguardando_endereco,
+    # processando, aguardando_correcoes, validando_creci, creci_invalido,
+    # criando_asaas, gerando_contrato, aguardando_assinatura, ativo, erro_asaas
     
     # Contrato
     contrato_gerado = Column(Boolean, default=False)
