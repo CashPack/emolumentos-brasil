@@ -14,12 +14,14 @@ from app.routers import webhooks_asaas_optimized as webhooks_asaas
 from app.routers import webhooks_rmchat
 from app.routers import webhooks_evolution
 from app.routers import module3_validate
+from app.routers import corretor
 from app.services.seed import ensure_admin
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.emoluments import EmolumentBracket, EmolumentTable, TableStatus
 from app.models.validation import ContactValidation
+from app.models.corretor import Corretor
 
 # Configuração de logging para aparecer nos logs do Render
 logging.basicConfig(
@@ -166,3 +168,4 @@ app.include_router(webhooks_asaas.router)
 app.include_router(webhooks_rmchat.router)
 app.include_router(webhooks_evolution.router)
 app.include_router(module3_validate.router)
+app.include_router(corretor.router)
