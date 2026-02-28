@@ -33,14 +33,22 @@ logging.getLogger("asaas-background").setLevel(logging.INFO)
 
 app = FastAPI(title="Pratico Admin API", version="0.1.0")
 
-# MVP: libera CORS para uso do admin web (e testes via browser). Em produção,
-# restringimos para o domínio do painel.
+# CORS configurado para aceitar requisições da landing page e do Bolt
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"] ,
-    allow_headers=["*"] ,
+    allow_origins=[
+        "https://praticodocumentos.com.br",
+        "https://www.praticodocumentos.com.br",
+        "https://admin.praticodocumentos.com.br",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://localhost:4321",
+        "https://pr-tico-documentos-o-863e.bolt.host",
+        "https://*.bolt.host",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
