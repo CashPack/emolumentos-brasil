@@ -1,12 +1,28 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.emoluments import EmolumentBracket, EmolumentTable, TableStatus
 
 router = APIRouter(prefix="/calc", tags=["calc"])
+
+
+class CalcularRequest(BaseModel):
+    uf: str
+    valor: float
+
+
+class CalcularResponse(BaseModel):
+    uf: str
+    valor: float
+    custo_local: float
+    custo_pratico: float
+    economia: float
+    economia_pct: float
+    comissao_corretor: float
 
 
 @router.get("/deed")
@@ -112,3 +128,36 @@ def calc_deed_economy(uf: str, property_value: float, db: Session = Depends(get_
         "economia": economia,
         "economia_pct": (round((economia / float(base["emolumento"])) * 100, 2) if float(base["emolumento"]) else 0),
     }
+
+
+@router.post("/calcular", response_model=CalcularResponse)
+def calcular_economia(request: CalcularRequest, db: Session = Depends(get_db)):
+    """
+    Endpoint simplificado para a landing page.
+    Retorna custo local, custo PRÁTICO (melhor UF) e economia.
+    """
+    uf = request.uf.strip().upper()
+    valor = request.valor
+
+    # Obtém emolumento local
+    local_result = calc_deed(uf=uf, property_value=valor, db=db)
+    custo_local = float(local_result["emolumento"])
+
+    # Obtém melhor economia
+    economy_result = calc_deed_economy(uf=uf, property_value=valor, db=db)
+    custo_pratico = float(economy_result["best"]["emolumento"])
+    economia = economy_result["economia"]
+    economia_pct = economy_result["economia_pct"]
+
+    # Calcula comissão do corretor (35% da economia, como no fluxo)
+    comissao_corretor = round(economia * 0.35, 2)
+
+    return CalcularResponse(
+        uf=uf,
+        valor=valor,
+        custo_local=custo_local,
+        custo_pratico=custo_pratico,
+        economia=economia,
+        economia_pct=economia_pct,
+        comissao_corretor=comissao_corretor,
+    )
