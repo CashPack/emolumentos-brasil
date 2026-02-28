@@ -1,19 +1,15 @@
 """
 Módulo 0 - Cadastro de Corretores (Fluxo Final Guiado)
-Endpoint para onboarding de corretores parceiros via WhatsApp
-Fluxo: Doc1 → Doc2 → Doc3 → Endereço → Processamento em Lote
+Fluxo: Doc1 (RG/CNH) → Doc2 (CRECI) → Escolha Endereço → Doc3/Endereço → Estado Civil → Processamento Lote
 """
 import os
 import json
 import uuid
 import asyncio
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict, Any
 
-from fastapi import (
-    APIRouter, Request, Depends, HTTPException, 
-    BackgroundTasks
-)
+from fastapi import APIRouter, Request, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -27,43 +23,23 @@ from app.services.contract_generator import generate_partnership_contract, Corre
 
 router = APIRouter(prefix="/api/corretor", tags=["Module 0 - Cadastro Corretor"])
 
-# ==================== CONFIGURAÇÕES ====================
-PROCESSING_DELAY = 30  # segundos para processar em lote
+PROCESSING_DELAY = 30
 
-# ==================== MODELOS ====================
-
-class StartCadastroRequest(BaseModel):
-    phone: str
-
-
-class ConfirmarDadosRequest(BaseModel):
-    cadastro_id: str
-    campo: str  # nome, cpf, data_nascimento, creci_numero, creci_uf, endereco
-    valor: str
-
-
-class FinalizarCadastroRequest(BaseModel):
-    cadastro_id: str
-    email: str
-    confirmacao_dados: bool  # Confirma que todos os dados estão corretos
-
-
-# ==================== ENDPOINT: INICIAR CADASTRO ====================
+# ==================== ENDPOINT: INICIAR ====================
 
 @router.post("/iniciar")
-async def iniciar_cadastro(
-    request: StartCadastroRequest,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
-):
-    """Inicia cadastro e solicita primeiro documento (RG ou CNH)"""
+async def iniciar_cadastro(request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Inicia cadastro e solicita RG ou CNH"""
     try:
+        data = await request.json()
+        phone = data.get("phone", "")
+        
         cadastro_id = str(uuid.uuid4())[:8]
         
         corretor = Corretor(
             cadastro_id=cadastro_id,
-            phone=request.phone,
-            status="aguardando_doc1",  # Estado inicial
+            phone=phone,
+            status="aguardando_doc1",
             created_at=datetime.utcnow()
         )
         db.add(corretor)
@@ -72,25 +48,20 @@ async def iniciar_cadastro(
         mensagem = """
 👋 Bem-vindo à PRÁTICO Documentos!
 
-Vou te auxiliar no cadastro de corretor parceiro. Serão apenas alguns passos rápidos!
+Vou te auxiliar no cadastro de corretor parceiro.
 
-📎 *PASSO 1/4: Documento de Identidade*
+📎 *PASSO 1/5: Documento de Identidade*
 
 Envie foto do seu documento:
 • RG (frente e verso), OU
 • CNH (frente e verso)
 
-💡 Envie as fotos uma de cada vez, em mensagens separadas.
+💡 Envie as fotos uma de cada vez.
         """.strip()
         
-        background_tasks.add_task(send_text_message, phone=request.phone, text=mensagem)
+        background_tasks.add_task(send_text_message, phone=phone, text=mensagem)
         
-        return {
-            "success": True,
-            "cadastro_id": cadastro_id,
-            "status": "aguardando_doc1",
-            "message": "Cadastro iniciado. Aguardando RG ou CNH."
-        }
+        return {"success": True, "cadastro_id": cadastro_id, "status": "aguardando_doc1"}
         
     except Exception as e:
         print(f"[INICIAR] Erro: {e}")
@@ -100,15 +71,8 @@ Envie foto do seu documento:
 # ==================== WEBHOOK: RECEBER DOCUMENTOS ====================
 
 @router.post("/webhook/documento")
-async def receber_documento_webhook(
-    request: Request,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
-):
-    """
-    Webhook para receber documentos via WhatsApp.
-    Gerencia fluxo: doc1 → doc2 → doc3 → endereço → processamento
-    """
+async def receber_documento_webhook(request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Webhook para receber documentos via WhatsApp - gerencia fluxo passo a passo"""
     try:
         data = await request.json()
         event = data.get("event", "")
@@ -121,7 +85,6 @@ async def receber_documento_webhook(
         remote_jid = message.get("remoteJid", "")
         phone = remote_jid.split("@")[0]
         
-        # Verifica se é imagem
         has_image = "imageMessage" in message
         has_document = "documentMessage" in message
         is_text = "conversation" in message or "extendedTextMessage" in message
@@ -134,25 +97,24 @@ async def receber_documento_webhook(
         
         if not corretor:
             background_tasks.add_task(
-                send_text_message, 
-                phone=phone, 
+                send_text_message, phone=phone,
                 text="📋 Cadastro não encontrado. Inicie em: https://praticodocumentos.com.br/corretor"
             )
             return {"success": False, "message": "Cadastro não encontrado"}
         
-        # Processa conforme estado atual
+        # Roteia conforme estado
         if corretor.status == "aguardando_doc1" and (has_image or has_document):
             return await processar_doc1(corretor, message, phone, background_tasks, db)
-            
         elif corretor.status == "aguardando_doc2" and (has_image or has_document):
             return await processar_doc2(corretor, message, phone, background_tasks, db)
-            
+        elif corretor.status == "aguardando_escolha_endereco":
+            return await processar_escolha_endereco(corretor, message, phone, is_text, background_tasks, db)
         elif corretor.status == "aguardando_doc3" and (has_image or has_document):
             return await processar_doc3(corretor, message, phone, background_tasks, db)
-            
-        elif corretor.status == "aguardando_endereco":
-            return await processar_endereco(corretor, message, phone, is_text, background_tasks, db)
-            
+        elif corretor.status == "aguardando_endereco_digitado" and is_text:
+            return await processar_endereco_digitado(corretor, message, phone, background_tasks, db)
+        elif corretor.status == "aguardando_estado_civil" and is_text:
+            return await processar_estado_civil(corretor, message, phone, background_tasks, db)
         elif corretor.status == "aguardando_correcoes" and is_text:
             return await processar_correcao(corretor, message, phone, background_tasks, db)
         
@@ -168,35 +130,28 @@ async def receber_documento_webhook(
 async def processar_doc1(corretor, message, phone, background_tasks, db):
     """Processa primeiro documento (RG ou CNH)"""
     try:
-        # Extrai URL
         media_url = message.get("imageMessage", {}).get("url") or message.get("documentMessage", {}).get("url")
         if not media_url:
-            background_tasks.add_task(
-                send_text_message, phone=phone, text="❌ Não consegui receber a imagem. Tente enviar novamente."
-            )
+            background_tasks.add_task(send_text_message, phone=phone, text="❌ Não consegui receber a imagem. Tente enviar novamente.")
             return {"success": False, "message": "URL não encontrada"}
         
-        # Salva e marca como recebido
         corretor.temp_doc1_url = media_url
         corretor.status = "aguardando_doc2"
         db.commit()
         
-        # Confirma recebimento e solicita próximo
         mensagem = """
 ✅ Documento de identidade recebido!
 
-📎 *PASSO 2/4: Carteira CRECI*
+📎 *PASSO 2/5: Carteira CRECI*
 
 Envie foto da sua carteira do CRECI (frente e verso).
         """.strip()
         
         background_tasks.add_task(send_text_message, phone=phone, text=mensagem)
-        
-        return {"success": True, "status": "aguardando_doc2", "message": "Doc1 recebido, aguardando CRECI"}
+        return {"success": True, "status": "aguardando_doc2"}
         
     except Exception as e:
         print(f"[DOC1] Erro: {e}")
-        background_tasks.add_task(send_text_message, phone=phone, text="❌ Erro ao processar. Tente novamente.")
         return {"success": False, "error": str(e)}
 
 
@@ -209,242 +164,181 @@ async def processar_doc2(corretor, message, phone, background_tasks, db):
             return {"success": False, "message": "URL não encontrada"}
         
         corretor.temp_doc2_url = media_url
-        corretor.status = "aguardando_doc3"
+        corretor.status = "aguardando_escolha_endereco"
         db.commit()
         
         mensagem = """
 ✅ Carteira CRECI recebida!
 
-📎 *PASSO 3/4: Comprovante de Residência*
+📍 *PASSO 3/5: Endereço*
 
-Envie foto de um comprovante de residência em seu nome.
+Como você prefere informar seu endereço?
+
+1️⃣ *Digitar manualmente*
+2️⃣ *Enviar foto do comprovante* (nossa IA extrai)
+
+Responda com o número *1* ou *2*.
         """.strip()
         
         background_tasks.add_task(send_text_message, phone=phone, text=mensagem)
-        
-        return {"success": True, "status": "aguardando_doc3", "message": "Doc2 recebido, aguardando comprovante"}
+        return {"success": True, "status": "aguardando_escolha_endereco"}
         
     except Exception as e:
         print(f"[DOC2] Erro: {e}")
         return {"success": False, "error": str(e)}
 
 
-async def processar_doc3(corretor, message, phone, background_tasks, db):
-    """Processa terceiro documento (Comprovante)"""
+async def processar_escolha_endereco(corretor, message, phone, is_text, background_tasks, db):
+    """Processa escolha do método de endereço"""
     try:
-        media_url = message.get("imageMessage", {}).get("url") or message.get("documentMessage", {}).get("url")
-        if not media_url:
-            background_tasks.add_task(send_text_message, phone=phone, text="❌ Não consegui receber a imagem.")
-            return {"success": False, "message": "URL não encontrada"}
-        
-        corretor.temp_doc3_url = media_url
-        corretor.status = "aguardando_endereco"
-        corretor.all_docs_received_at = datetime.utcnow()
-        db.commit()
-        
-        mensagem = """
-✅ Comprovante de residência recebido!
-
-📍 *PASSO 4/4: Endereço*
-
-Qual seu endereço completo?
-
-Digite manualmente ou digite *EXTRAIR* para tentarmos extrair do comprovante (pode não ser preciso).
-        """.strip()
-        
-        background_tasks.add_task(send_text_message, phone=phone, text=mensagem)
-        
-        return {"success": True, "status": "aguardando_endereco", "message": "Doc3 recebido, aguardando endereço"}
-        
-    except Exception as e:
-        print(f"[DOC3] Erro: {e}")
-        return {"success": False, "error": str(e)}
-
-
-async def processar_endereco(corretor, message, phone, is_text, background_tasks, db):
-    """Processa entrada do endereço"""
-    try:
-        # Extrai texto da mensagem
         text = ""
         if "conversation" in message:
             text = message["conversation"]
         elif "extendedTextMessage" in message:
             text = message["extendedTextMessage"].get("text", "")
         
-        text_upper = text.strip().upper()
+        escolha = text.strip()
         
-        if text_upper == "EXTRAIR":
-            # Marca para extrair do comprovante via OCR
-            corretor.endereco_fonte = "ocr"
-            corretor.endereco = None
+        if escolha == "1":
+            # Opção 1: Digitar manualmente
+            corretor.status = "aguardando_endereco_digitado"
+            db.commit()
+            
+            mensagem = """
+✏️ *Digite seu endereço completo:*
+
+Formato: Rua/Av, número, complemento, bairro, cidade - UF, CEP
+
+_Exemplo: Av. Paulista, 1000, apto 42, Jardins, São Paulo - SP, 01310-100_
+            """.strip()
+            
+            background_tasks.add_task(send_text_message, phone=phone, text=mensagem)
+            return {"success": True, "status": "aguardando_endereco_digitado"}
+            
+        elif escolha == "2":
+            # Opção 2: Enviar foto do comprovante
+            corretor.status = "aguardando_doc3"
+            db.commit()
+            
+            mensagem = """
+📎 *Envie foto do comprovante de residência*
+
+Pode ser conta de luz, água, telefone, etc. Em seu nome ou de parente próximo.
+            """.strip()
+            
+            background_tasks.add_task(send_text_message, phone=phone, text=mensagem)
+            return {"success": True, "status": "aguardando_doc3"}
         else:
-            # Usa texto digitado
-            corretor.endereco_fonte = "digitado"
-            corretor.endereco = text.strip()
+            # Resposta inválida
+            background_tasks.add_task(
+                send_text_message,
+                phone=phone,
+                text="❓ Não entendi. Responda com *1* (digitar) ou *2* (enviar foto)."
+            )
+            return {"success": False, "erro": "Escolha inválida"}
+            
+    except Exception as e:
+        print(f"[ESCOLHA] Erro: {e}")
+        return {"success": False, "error": str(e)}
+
+
+async def processar_endereco_digitado(corretor, message, phone, background_tasks, db):
+    """Processa endereço digitado manualmente"""
+    try:
+        text = ""
+        if "conversation" in message:
+            text = message["conversation"]
+        elif "extendedTextMessage" in message:
+            text = message["extendedTextMessage"].get("text", "")
         
-        corretor.status = "processando"
+        endereco = text.strip()
+        
+        # Salva endereço
+        corretor.endereco_completo = endereco
+        corretor.endereco_fonte = "digitado"
+        corretor.status = "aguardando_estado_civil"
         db.commit()
         
-        mensagem = f"""
-✅ Todos os dados recebidos!
+        mensagem = """
+✅ Endereço registrado!
 
-⏱️ Processando seus documentos... (aprox. {PROCESSING_DELAY}s)
+💍 *PASSO 4/5: Estado Civil*
 
-Aguarde enquanto extraio as informações automaticamente.
+Informe seu estado civil:
+
+1️⃣ Solteiro(a)
+2️⃣ Casado(a)
+3️⃣ Divorciado(a)
+4️⃣ Viúvo(a)
+
+Responda com o número correspondente.
         """.strip()
         
         background_tasks.add_task(send_text_message, phone=phone, text=mensagem)
-        
-        # Agenda processamento em lote
-        background_tasks.add_task(
-            processar_todos_documentos,
-            corretor_id=corretor.id,
-            phone=phone
-        )
-        
-        return {"success": True, "status": "processando", "message": "Iniciando processamento em lote"}
+        return {"success": True, "status": "aguardando_estado_civil"}
         
     except Exception as e:
         print(f"[ENDERECO] Erro: {e}")
         return {"success": False, "error": str(e)}
 
 
-# ==================== PROCESSAMENTO EM LOTE ====================
-
-async def processar_todos_documentos(corretor_id: int, phone: str):
-    """Processa todos os documentos em lote após timeout"""
-    # Aguarda processamento
-    await asyncio.sleep(PROCESSING_DELAY)
-    
-    from app.db.session import SessionLocal
-    db = SessionLocal()
-    
+async def processar_estado_civil(corretor, message, phone, background_tasks, db):
+    """Processa estado civil"""
     try:
-        corretor = db.query(Corretor).filter(Corretor.id == corretor_id).first()
-        if not corretor:
-            return
+        text = ""
+        if "conversation" in message:
+            text = message["conversation"]
+        elif "extendedTextMessage" in message:
+            text = message["extendedTextMessage"].get("text", "")
         
-        resultados = {
-            "nome": None,
-            "cpf": None,
-            "data_nascimento": None,
-            "creci_numero": None,
-            "creci_uf": None,
-            "endereco": corretor.endereco  # Já temos se foi digitado
+        escolha = text.strip()
+        
+        mapa = {
+            "1": "solteiro",
+            "2": "casado",
+            "3": "divorciado",
+            "4": "viuvo"
         }
         
-        # Processa doc1 (RG/CNH)
-        if corretor.temp_doc1_url:
-            try:
-                import requests
-                resp = requests.get(corretor.temp_doc1_url, timeout=30)
-                if resp.status_code == 200:
-                    ocr = extract_document_data(resp.content)
-                    data = ocr.get("data", {})
-                    resultados["nome"] = data.get("nome")
-                    resultados["cpf"] = data.get("cpf")
-                    resultados["data_nascimento"] = data.get("data_nascimento")
-            except Exception as e:
-                print(f"[PROCESS] Erro OCR doc1: {e}")
+        if escolha not in mapa:
+            background_tasks.add_task(
+                send_text_message,
+                phone=phone,
+                text="❓ Responda com 1, 2, 3 ou 4."
+            )
+            return {"success": False, "erro": "Escolha inválida"}
         
-        # Processa doc2 (CRECI)
-        if corretor.temp_doc2_url:
-            try:
-                import requests
-                resp = requests.get(corretor.temp_doc2_url, timeout=30)
-                if resp.status_code == 200:
-                    ocr = extract_document_data(resp.content)
-                    data = ocr.get("data", {})
-                    resultados["creci_numero"] = data.get("creci_numero")
-                    resultados["creci_uf"] = data.get("creci_uf")
-            except Exception as e:
-                print(f"[PROCESS] Erro OCR doc2: {e}")
-        
-        # Processa doc3 (Comprovante) - só se endereço não foi digitado
-        if corretor.endereco_fonte == "ocr" and corretor.temp_doc3_url:
-            try:
-                import requests
-                resp = requests.get(corretor.temp_doc3_url, timeout=30)
-                if resp.status_code == 200:
-                    ocr = extract_document_data(resp.content)
-                    data = ocr.get("data", {})
-                    resultados["endereco"] = data.get("endereco")
-            except Exception as e:
-                print(f"[PROCESS] Erro OCR doc3: {e}")
-        
-        # Salva resultados
-        corretor.dados_extraidos = json.dumps(resultados)
-        corretor.status = "aguardando_correcoes"
+        corretor.estado_civil = mapa[escolha]
+        corretor.status = "processando"
         db.commit()
         
-        # Monta resposta com dados e pendências
-        mensagem = montar_resposta_processamento(resultados)
-        send_text_message(phone, mensagem)
+        mensagem = f"""
+✅ Estado civil: {mapa[escolha].replace('_', ' ').title()}
+
+⏱️ *Processando seus documentos...* (aprox. {PROCESSING_DELAY}s)
+
+Estou extraindo todas as informações automaticamente.
+        """.strip()
+        
+        background_tasks.add_task(send_text_message, phone=phone, text=mensagem)
+        
+        # Agenda processamento
+        background_tasks.add_task(
+            processar_todos_documentos,
+            corretor_id=corretor.id,
+            phone=phone
+        )
+        
+        return {"success": True, "status": "processando"}
         
     except Exception as e:
-        print(f"[PROCESS] Erro: {e}")
-        send_text_message(phone, "❌ Erro ao processar documentos. Por favor, tente novamente ou contate o suporte.")
-    finally:
-        db.close()
+        print(f"[ESTADO_CIVIL] Erro: {e}")
+        return {"success": False, "error": str(e)}
 
-
-def montar_resposta_processamento(dados: Dict) -> str:
-    """Monta mensagem com dados extraídos e instruções para correção"""
-    msg = "✅ *Processamento concluído!*\n\n"
-    msg += "📋 *Dados identificados:*\n\n"
-    
-    if dados.get("nome"):
-        msg += f"👤 Nome: *{dados['nome']}*\n"
-    else:
-        msg += "👤 Nome: ❌ Não identificado\n"
-    
-    if dados.get("cpf"):
-        cpf = dados["cpf"]
-        cpf_fmt = f"{cpf[:3]}.{cpf[3:6]}.{cpf[6:9]}-{cpf[9:]}"
-        msg += f"🆔 CPF: *{cpf_fmt}*\n"
-    else:
-        msg += "🆔 CPF: ❌ Não identificado\n"
-    
-    if dados.get("data_nascimento"):
-        msg += f"🎂 Nascimento: *{dados['data_nascimento']}*\n"
-    
-    if dados.get("creci_numero"):
-        uf = dados.get("creci_uf", "UF")
-        msg += f"🏷️ CRECI: *{dados['creci_numero']}/{uf}*\n"
-    else:
-        msg += "🏷️ CRECI: ❌ Não identificado\n"
-    
-    if dados.get("endereco"):
-        end = dados["endereco"][:50] + "..." if len(dados["endereco"]) > 50 else dados["endereco"]
-        msg += f"📍 Endereço: *{end}*\n"
-    else:
-        msg += "📍 Endereço: ❌ Não identificado\n"
-    
-    msg += "\n✏️ *Para corrigir ou completar dados:*\n"
-    msg += "Digite: CAMPO: valor\n"
-    msg += "_Exemplos:_\n"
-    
-    if not dados.get("nome"):
-        msg += "• NOME: João Silva\n"
-    if not dados.get("cpf"):
-        msg += "• CPF: 12345678900\n"
-    if not dados.get("creci_numero"):
-        msg += "• CRECI: 12345/SP\n"
-    if not dados.get("endereco"):
-        msg += "• ENDERECO: Rua Exemplo, 123 - Centro\n"
-    
-    msg += "\n✅ *Quando todos os dados estiverem corretos, digite:* CONFIRMAR\n"
-    msg += "_E informe seu email para finalizar o cadastro._"
-    
-    return msg
-
-
-# ==================== CORREÇÃO DE DADOS ====================
 
 async def processar_correcao(corretor, message, phone, background_tasks, db):
     """Processa correção de dados enviada pelo usuário"""
     try:
-        # Extrai texto
         text = ""
         if "conversation" in message:
             text = message["conversation"]
@@ -455,16 +349,28 @@ async def processar_correcao(corretor, message, phone, background_tasks, db):
         
         # Verifica se é confirmação final
         if text_upper == "CONFIRMAR" or "CONFIRMAR" in text_upper:
+            # Verifica se ainda há pendências
+            pendencias = json.loads(corretor.pendencias or "[]")
+            if pendencias:
+                background_tasks.add_task(
+                    send_text_message,
+                    phone=phone,
+                    text=f"⚠️ Ainda há pendências: {', '.join(pendencias)}. Corrija antes de confirmar."
+                )
+                return {"success": False, "acao": "pendencias_restantes"}
+            
             background_tasks.add_task(
-                send_text_message, 
-                phone=phone, 
-                text="📧 Perfeito! Agora informe seu email para criarmos sua conta:"
+                send_text_message,
+                phone=phone,
+                text="📧 Perfeito! Agora informe seu email para finalizar o cadastro:"
             )
+            corretor.status = "aguardando_email"
+            db.commit()
             return {"success": True, "acao": "solicitar_email"}
         
-        # Verifica se é email (contém @)
-        if "@" in text and "." in text:
-            return await finalizar_cadastro_completo(corretor, text.strip(), phone, background_tasks, db)
+        # Verifica se é email
+        if "@" in text and "." in text and " " not in text.strip():
+            return await finalizar_cadastro(corretor, text.strip(), phone, background_tasks, db)
         
         # Processa correção no formato "CAMPO: valor"
         if ":" in text:
@@ -474,6 +380,7 @@ async def processar_correcao(corretor, message, phone, background_tasks, db):
             
             # Recupera dados atuais
             dados = json.loads(corretor.dados_extraidos or "{}")
+            pendencias = json.loads(corretor.pendencias or "[]")
             
             # Mapeia campos
             mapeamento = {
@@ -496,13 +403,18 @@ async def processar_correcao(corretor, message, phone, background_tasks, db):
                 else:
                     dados[campo_padrao] = valor
                 
+                # Remove da lista de pendências se existir
+                if campo_padrao in pendencias:
+                    pendencias.remove(campo_padrao)
+                
                 corretor.dados_extraidos = json.dumps(dados)
+                corretor.pendencias = json.dumps(pendencias)
                 db.commit()
                 
                 background_tasks.add_task(
                     send_text_message,
                     phone=phone,
-                    text=f"✅ *{campo}* atualizado para: {valor}\n\nContinue corrigindo ou digite CONFIRMAR quando estiver tudo certo."
+                    text=f"✅ *{campo}* atualizado!\n\nContinue corrigindo ou digite CONFIRMAR quando estiver tudo certo."
                 )
                 
                 return {"success": True, "campo_atualizado": campo_padrao}
@@ -510,7 +422,7 @@ async def processar_correcao(corretor, message, phone, background_tasks, db):
                 background_tasks.add_task(
                     send_text_message,
                     phone=phone,
-                    text=f"❌ Campo *{campo}* não reconhecido.\n\nCampos válidos: NOME, CPF, DATA_NASCIMENTO, CRECI, ENDERECO"
+                    text=f"❌ Campo *{campo}* não reconhecido.\nUse: NOME, CPF, DATA_NASCIMENTO, CRECI, ENDERECO"
                 )
                 return {"success": False, "erro": "Campo não reconhecido"}
         else:
@@ -526,9 +438,7 @@ async def processar_correcao(corretor, message, phone, background_tasks, db):
         return {"success": False, "error": str(e)}
 
 
-# ==================== FINALIZAÇÃO ====================
-
-async def finalizar_cadastro_completo(corretor, email, phone, background_tasks, db):
+async def finalizar_cadastro(corretor, email, phone, background_tasks, db):
     """Finaliza cadastro: valida CRECI, cria Asaas, gera contrato"""
     try:
         dados = json.loads(corretor.dados_extraidos or "{}")
@@ -545,8 +455,10 @@ async def finalizar_cadastro_completo(corretor, email, phone, background_tasks, 
         if faltando:
             send_text_message(
                 phone,
-                f"❌ Ainda faltam dados obrigatórios: {', '.join(faltando)}\n\nPor favor, complete antes de confirmar."
+                f"❌ Dados obrigatórios faltando: {', '.join(faltando)}. Corrija antes de finalizar."
             )
+            corretor.status = "aguardando_correcoes"
+            db.commit()
             return {"success": False, "faltando": faltando}
         
         # Atualiza cadastro
@@ -555,7 +467,6 @@ async def finalizar_cadastro_completo(corretor, email, phone, background_tasks, 
         corretor.data_nascimento = dados.get("data_nascimento")
         corretor.creci_numero = dados["creci_numero"]
         corretor.creci_uf = dados.get("creci_uf", "SP")
-        corretor.endereco = dados.get("endereco")
         corretor.email = email
         corretor.status = "validando_creci"
         db.commit()
@@ -568,7 +479,7 @@ async def finalizar_cadastro_completo(corretor, email, phone, background_tasks, 
             db.commit()
             send_text_message(
                 phone,
-                f"❌ *CRECI não validado:* {creci_valid.get('mensagem', 'Registro não encontrado')}\n\nVerifique o número e UF, ou contate o suporte."
+                f"❌ *CRECI não validado:* {creci_valid.get('mensagem', 'Registro não encontrado')}\nVerifique e corrija."
             )
             return {"success": False, "erro": "CRECI inválido"}
         
@@ -603,11 +514,11 @@ async def finalizar_cadastro_completo(corretor, email, phone, background_tasks, 
             
             contrato = generate_partnership_contract(corretor_data)
             corretor.contrato_gerado = True
-            corretor.contrato_url = contrato.get("assinatura_url", "https://praticodocumentos.com.br/contratos/pendentes")
-            corretor.status = "aguardando_assinatura"
+            corretor.contrato_url = contrato.get("assinatura_url", "https://praticodocumentos.com.br/contratos")
+            corretor.status = "aguardando_aceite"
             db.commit()
             
-            # Mensagem de sucesso
+            # Mensagem de sucesso com contrato
             mensagem = f"""
 🎉 *CADASTRO QUASE COMPLETO!*
 
@@ -616,17 +527,23 @@ async def finalizar_cadastro_completo(corretor, email, phone, background_tasks, 
 ✅ Conta Asaas criada  
 ✅ Contrato gerado
 
-📄 *Próximo passo:* Assine o contrato digital
-Link: {corretor.contrato_url}
+📄 *CONTRATO DE PARCERIA*
 
-Após assinar, seu cadastro estará *ATIVO* e você poderá começar a indicar clientes!
+Leia atentamente o contrato em: {corretor.contrato_url}
 
-💰 Comissões de até 35% sobre a economia gerada.
+💡 *Resumo:*
+• Comissão de até 35% sobre economia gerada
+• Pagamento via Asaas (automático)
+• Vigência indeterminada
+• Rescisão com 30 dias de aviso
+
+✅ *Para aceitar, digite:* **ACEITO**
+
+Após o aceite, seu cadastro estará *ATIVO*!
             """.strip()
             
             send_text_message(phone, mensagem)
-            
-            return {"success": True, "status": "aguardando_assinatura"}
+            return {"success": True, "status": "aguardando_aceite"}
         else:
             corretor.status = "erro_asaas"
             db.commit()
@@ -635,8 +552,143 @@ Após assinar, seu cadastro estará *ATIVO* e você poderá começar a indicar c
             
     except Exception as e:
         print(f"[FINALIZAR] Erro: {e}")
-        send_text_message(phone, "❌ Erro ao finalizar cadastro. Entre em contato com o suporte.")
+        send_text_message(phone, "❌ Erro ao finalizar. Contate o suporte.")
         return {"success": False, "error": str(e)}
+
+
+# ==================== PROCESSAMENTO EM LOTE ====================
+
+async def processar_todos_documentos(corretor_id: int, phone: str):
+    """Processa todos os documentos em lote após timeout"""
+    await asyncio.sleep(PROCESSING_DELAY)
+    
+    from app.db.session import SessionLocal
+    db = SessionLocal()
+    
+    try:
+        corretor = db.query(Corretor).filter(Corretor.id == corretor_id).first()
+        if not corretor:
+            return
+        
+        resultados = {"nome": None, "cpf": None, "data_nascimento": None, 
+                     "creci_numero": None, "creci_uf": None, "endereco": None}
+        
+        # Processa doc1 (RG/CNH)
+        if corretor.temp_doc1_url:
+            try:
+                import requests
+                resp = requests.get(corretor.temp_doc1_url, timeout=30)
+                if resp.status_code == 200:
+                    ocr = extract_document_data(resp.content)
+                    data = ocr.get("data", {})
+                    resultados["nome"] = data.get("nome")
+                    resultados["cpf"] = data.get("cpf")
+                    resultados["data_nascimento"] = data.get("data_nascimento")
+            except Exception as e:
+                print(f"[PROCESS] Erro doc1: {e}")
+        
+        # Processa doc2 (CRECI)
+        if corretor.temp_doc2_url:
+            try:
+                import requests
+                resp = requests.get(corretor.temp_doc2_url, timeout=30)
+                if resp.status_code == 200:
+                    ocr = extract_document_data(resp.content)
+                    data = ocr.get("data", {})
+                    resultados["creci_numero"] = data.get("creci_numero")
+                    resultados["creci_uf"] = data.get("creci_uf")
+            except Exception as e:
+                print(f"[PROCESS] Erro doc2: {e}")
+        
+        # Processa doc3 (Comprovante) se endereço não foi digitado
+        if corretor.endereco_fonte == "ocr" and corretor.temp_doc3_url:
+            try:
+                import requests
+                resp = requests.get(corretor.temp_doc3_url, timeout=30)
+                if resp.status_code == 200:
+                    ocr = extract_document_data(resp.content)
+                    data = ocr.get("data", {})
+                    resultados["endereco"] = data.get("endereco")
+            except Exception as e:
+                print(f"[PROCESS] Erro doc3: {e}")
+        elif corretor.endereco_fonte == "digitado":
+            resultados["endereco"] = corretor.endereco
+        
+        # Salva resultados
+        corretor.dados_extraidos = json.dumps(resultados)
+        
+        # Identifica pendências
+        pendencias = []
+        if not resultados["nome"]:
+            pendencias.append("nome")
+        if not resultados["cpf"]:
+            pendencias.append("cpf")
+        if not resultados["creci_numero"]:
+            pendencias.append("creci_numero")
+        if not resultados["endereco"]:
+            pendencias.append("endereco")
+        
+        corretor.pendencias = json.dumps(pendencias)
+        
+        if pendencias:
+            corretor.status = "aguardando_correcoes"
+        else:
+            corretor.status = "aguardando_email"
+        
+        db.commit()
+        
+        # Envia resposta
+        mensagem = montar_resposta_processamento(resultados, pendencias)
+        send_text_message(phone, mensagem)
+        
+    except Exception as e:
+        print(f"[PROCESS] Erro: {e}")
+        send_text_message(phone, "❌ Erro ao processar. Tente novamente ou contate o suporte.")
+    finally:
+        db.close()
+
+
+def montar_resposta_processamento(dados: dict, pendencias: list) -> str:
+    """Monta mensagem com dados extraídos e pendências"""
+    msg = "✅ *Processamento concluído!*\n\n"
+    msg += "📋 *Dados identificados:*\n\n"
+    
+    if dados.get("nome"):
+        msg += f"👤 Nome: *{dados['nome']}*\n"
+    else:
+        msg += "👤 Nome: ❌ Não identificado\n"
+    
+    if dados.get("cpf"):
+        cpf = dados["cpf"]
+        cpf_fmt = f"{cpf[:3]}.{cpf[3:6]}.{cpf[6:9]}-{cpf[9:]}"
+        msg += f"🆔 CPF: *{cpf_fmt}*\n"
+    else:
+        msg += "🆔 CPF: ❌ Não identificado\n"
+    
+    if dados.get("data_nascimento"):
+        msg += f"🎂 Nascimento: *{dados['data_nascimento']}*\n"
+    
+    if dados.get("creci_numero"):
+        uf = dados.get("creci_uf", "UF")
+        msg += f"🏷️ CRECI: *{dados['creci_numero']}/{uf}*\n"
+    else:
+        msg += "🏷️ CRECI: ❌ Não identificado\n"
+    
+    if dados.get("endereco"):
+        end = dados["endereco"][:50] + "..." if len(dados["endereco"]) > 50 else dados["endereco"]
+        msg += f"📍 Endereço: *{end}*\n"
+    else:
+        msg += "📍 Endereço: ❌ Não identificado\n"
+    
+    if pendencias:
+        msg += "\n⚠️ *Precisamos corrigir:*\n"
+        for p in pendencias:
+            msg += f"• {p.replace('_', ' ').title()}\n"
+        msg += "\n✏️ *Para corrigir, digite:*\nCAMPO: valor\n_Ex: NOME: João Silva_\n\n✅ Quando estiver tudo certo, digite: *CONFIRMAR*"
+    else:
+        msg += "\n🎉 *Todos os dados identificados!*\n\n✅ Digite *CONFIRMAR* e informe seu email para finalizar."
+    
+    return msg
 
 
 # ==================== STATUS E CONSULTAS ====================
@@ -650,19 +702,13 @@ async def consultar_status(cadastro_id: str, db: Session = Depends(get_db)):
             raise HTTPException(status_code=404, detail="Cadastro não encontrado")
         
         dados = json.loads(corretor.dados_extraidos or "{}")
+        pendencias = json.loads(corretor.pendencias or "[]")
         
         progresso = {
-            "aguardando_doc1": 10,
-            "aguardando_doc2": 25,
-            "aguardando_doc3": 40,
-            "aguardando_endereco": 50,
-            "processando": 60,
-            "aguardando_correcoes": 70,
-            "validando_creci": 80,
-            "criando_asaas": 85,
-            "gerando_contrato": 90,
-            "aguardando_assinatura": 95,
-            "ativo": 100
+            "aguardando_doc1": 10, "aguardando_doc2": 25, "aguardando_escolha_endereco": 35,
+            "aguardando_doc3": 40, "aguardando_endereco_digitado": 40, "aguardando_estado_civil": 45,
+            "processando": 50, "aguardando_correcoes": 60, "aguardando_email": 70,
+            "criando_asaas": 80, "gerando_contrato": 85, "aguardando_aceite": 90, "ativo": 100
         }.get(corretor.status, 0)
         
         return {
@@ -670,6 +716,7 @@ async def consultar_status(cadastro_id: str, db: Session = Depends(get_db)):
             "status": corretor.status,
             "progresso": progresso,
             "dados": dados,
+            "pendencias": pendencias,
             "contrato_url": corretor.contrato_url,
             "cadastro_ativo": corretor.status == "ativo"
         }
@@ -678,24 +725,23 @@ async def consultar_status(cadastro_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/webhook/assinatura/{cadastro_id}")
-async def registrar_assinatura(
-    cadastro_id: str,
-    db: Session = Depends(get_db)
-):
-    """Webhook para confirmar assinatura do contrato"""
+@router.post("/webhook/aceite/{cadastro_id}")
+async def registrar_aceite(cadastro_id: str, request: Request, db: Session = Depends(get_db)):
+    """Webhook para registrar aceite do contrato"""
     try:
+        data = await request.json()
         corretor = db.query(Corretor).filter(Corretor.cadastro_id == cadastro_id).first()
+        
         if not corretor:
             raise HTTPException(status_code=404, detail="Cadastro não encontrado")
         
-        corretor.contrato_assinado = True
-        corretor.contrato_assinado_at = datetime.utcnow()
+        corretor.contrato_aceito = True
+        corretor.contrato_aceito_em = datetime.utcnow()
+        corretor.contrato_aceito_ip = data.get("ip", request.client.host if request.client else None)
         corretor.status = "ativo"
         corretor.ativo_desde = datetime.utcnow()
         db.commit()
         
-        # Mensagem de boas-vindas
         send_text_message(
             corretor.phone,
             f"""
